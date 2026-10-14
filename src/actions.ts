@@ -2,7 +2,7 @@ import { todayKey, weekStart } from './lib/date';
 import { MAX_AREAS } from './lib/defaults';
 import { logId, reviewId, uid } from './lib/ids';
 import { parseTask } from './lib/parse';
-import type { Area, BucketItem, Habit, Project, ProjectKind, Review, ReviewLevel, Session, Task } from './lib/types';
+import type { Area, BucketItem, Habit, Milestone, Project, ProjectKind, Review, ReviewLevel, Session, Task } from './lib/types';
 import { TABLES } from './lib/types';
 import { patchRow, putRows, useStore, type Settings } from './store';
 
@@ -24,7 +24,8 @@ export const updateHabit = (id: string, patch: Partial<Habit>) => patchRow('habi
 
 // ---------- 할 일 ----------
 
-const activeProjects = () => Object.values(data().projects).filter((p) => !p.deleted && !p.done && p.kind === 'project');
+/** #이름으로 고를 수 있는 것: 진행 중인 프로젝트와 꾸준히 모두 */
+const activeProjects = () => Object.values(data().projects).filter((p) => !p.deleted && !p.done);
 
 /**
  * 한 줄 입력으로 할 일 추가.
@@ -73,6 +74,47 @@ export const updateProject = (id: string, patch: Partial<Project>) => patchRow('
 export const deleteProject = (id: string) => patchRow('projects', id, { deleted: true });
 export const toggleProjectDone = (p: Project) =>
   updateProject(p.id, p.done ? { done: false, done_on: '' } : { done: true, done_on: todayKey() });
+
+// ---------- 성과 목표 ----------
+
+export const updateCurrent = (p: Project, current: string) => updateProject(p.id, { current, current_on: todayKey() });
+
+/** 지금 진행 중인 목표 = 아직 달성 안 한 첫 목표 */
+export const activeMilestone = (p: Project): Milestone | undefined => (p.milestones ?? []).find((m) => !m.done);
+
+/** 새 목표는 바로 앞 목표를 달성한 날(없으면 오늘)부터 시작한 것으로 본다 */
+export function addMilestone(p: Project, title: string, due: string, final: boolean) {
+  const list = p.milestones ?? [];
+  const lastDone = [...list].reverse().find((m) => m.done);
+  const start = list.some((m) => !m.done) ? todayKey() : (lastDone?.done_on ?? todayKey());
+  updateProject(p.id, {
+    milestones: [...list, { id: uid(), title: title.trim(), start, due, done: false, done_on: '', final }],
+  });
+}
+
+export function updateMilestone(p: Project, id: string, patch: Partial<Milestone>) {
+  updateProject(p.id, { milestones: (p.milestones ?? []).map((m) => (m.id === id ? { ...m, ...patch } : m)) });
+}
+
+/** 달성하면 다음 목표는 오늘부터 시작한 것으로 (투입 시간을 그날부터 센다) */
+export function toggleMilestone(p: Project, m: Milestone) {
+  const today = todayKey();
+  const list = p.milestones ?? [];
+  if (m.done) {
+    updateMilestone(p, m.id, { done: false, done_on: '' });
+    return;
+  }
+  const idx = list.findIndex((x) => x.id === m.id);
+  const nextIdx = list.findIndex((x, i) => i > idx && !x.done);
+  updateProject(p.id, {
+    milestones: list.map((x, i) =>
+      i === idx ? { ...x, done: true, done_on: today } : i === nextIdx ? { ...x, start: today } : x,
+    ),
+  });
+}
+
+export const deleteMilestone = (p: Project, id: string) =>
+  updateProject(p.id, { milestones: (p.milestones ?? []).filter((m) => m.id !== id) });
 
 /** 꾸준히 목표 변경: 이번 주부터 적용. 이전 목표는 기록으로 남는다 */
 export function setTarget(p: Project, hours: number) {

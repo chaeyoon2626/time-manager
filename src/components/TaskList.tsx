@@ -1,6 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { CalendarPlus, Check, Flame, Play, Square, Star, Trash2 } from 'lucide-react';
 import {
+  activeMilestone,
   addTaskFromText,
   deleteTask,
   stopTimer,
@@ -155,6 +156,7 @@ export function TaskRow({
   tracked,
   showProject = true,
   pinnable = false,
+  hideDate = false,
 }: {
   task: Task;
   today: string;
@@ -163,6 +165,8 @@ export function TaskRow({
   showProject?: boolean;
   /** "+오늘" 버튼: 보고 있는 날의 할 일로 올리기 */
   pinnable?: boolean;
+  /** 날짜 머리줄 아래에 있을 때: "10/18 예정" 표시 생략 */
+  hideDate?: boolean;
 }) {
   const projects = useProjectMap();
   const areas = useAreaMap();
@@ -183,7 +187,7 @@ export function TaskRow({
         {t.important && <Star className="mr-1 inline size-3.5 -translate-y-px fill-amber-400 text-amber-400" />}
         {t.title}
       </span>
-      {(late || scheduledOther) && !t.done && (
+      {(late || (scheduledOther && !hideDate)) && !t.done && (
         <span className={cn('ml-2 text-[11px] font-medium', late ? 'text-rose-600' : 'text-zinc-400')}>
           {late ? '밀림' : `${fmtShort(t.date)} 예정`}
         </span>
@@ -232,7 +236,7 @@ export function TaskRow({
 const ESTIMATES = [0, 15, 30, 45, 60, 90, 120, 180, 240];
 
 function TaskEditor({ task: t, today, tracked, onClose }: { task: Task; today: string; tracked: number; onClose: () => void }) {
-  const projects = useActiveProjects().filter((p) => p.kind === 'project');
+  const projects = useActiveProjects();
   const projectMap = useProjectMap();
   const lbl = 'mb-1 block text-[11px] font-medium text-zinc-400';
   const small = cn(fieldCls, 'h-8 w-full px-2 text-[13px]');
@@ -254,14 +258,27 @@ function TaskEditor({ task: t, today, tracked, onClose }: { task: Task; today: s
       <input value={t.title} onChange={(e) => updateTask(t.id, { title: e.target.value })} className={cn(fieldCls, 'mb-3 h-9 w-full px-3')} aria-label="할 일 이름" />
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <label className="block">
-          <span className={lbl}>프로젝트</span>
+          <span className={lbl}>분류</span>
           <select value={t.project_id} onChange={(e) => updateTask(t.id, { project_id: e.target.value })} className={small}>
-            <option value="">없음 (일회성)</option>
-            {options.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.title}
-              </option>
-            ))}
+            <option value="">일회성</option>
+            {(
+              [
+                ['project', '프로젝트'],
+                ['steady', '꾸준히'],
+              ] as const
+            ).map(([kind, label]) =>
+              options.some((p) => p.kind === kind) ? (
+                <optgroup key={kind} label={label}>
+                  {options
+                    .filter((p) => p.kind === kind)
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.title}
+                      </option>
+                    ))}
+                </optgroup>
+              ) : null,
+            )}
           </select>
         </label>
         <div>
@@ -353,6 +370,18 @@ export function HabitRow({ habit: h, date, logs, streakDays }: { habit: Habit; d
   );
 }
 
+/** 지금 향하는 성과 목표 한 줄: "→ HSK 4급 · D-61" */
+export function MilestoneHint({ p, today }: { p: Project; today: string }) {
+  const m = activeMilestone(p);
+  if (!m) return null;
+  return (
+    <span className="ml-2 text-xs text-zinc-500">
+      → {m.title}
+      {m.due && <span className={cn('ml-1 font-semibold tabular-nums', diffDays(m.due, today) < 0 ? 'text-rose-600' : 'text-zinc-400')}>{dDay(m.due, today)}</span>}
+    </span>
+  );
+}
+
 /** 꾸준히: 이번 주 기록 / 목표 */
 export function SteadyRow({ project: p, today, weekMinutes }: { project: Project; today: string; weekMinutes: number }) {
   const areas = useAreaMap();
@@ -382,6 +411,7 @@ export function SteadyRow({ project: p, today, weekMinutes }: { project: Project
           <a href={`#projects/${p.id}`} className="text-[15px] leading-snug hover:underline">
             {p.title}
           </a>
+          <MilestoneHint p={p} today={today} />
           <div className="mt-1.5 md:hidden">{progress}</div>
         </div>
         <div className="hidden min-w-0 md:block">
@@ -400,7 +430,7 @@ export function SteadyRow({ project: p, today, weekMinutes }: { project: Project
 
 export function QuickAdd({ defaultDate, projectId, placeholder }: { defaultDate: string; projectId?: string; placeholder?: string }) {
   const [text, setText] = useState('');
-  const projects = useActiveProjects().filter((p) => p.kind === 'project');
+  const projects = useActiveProjects();
   const projectMap = useProjectMap();
   const parsed = text.trim() ? parseTask(text, projects) : null;
   const pid = parsed?.project_id ?? projectId;

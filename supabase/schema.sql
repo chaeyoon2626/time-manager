@@ -68,11 +68,19 @@ create table if not exists public.projects (
   done_on    text not null default '',
   sort       double precision not null default 0,
   targets    jsonb not null default '[]',   -- 꾸준히: [{"from": "YYYY-MM-DD", "hours": 4}, …]
+  note       text not null default '',      -- 자유 메모
+  current    text not null default '',      -- 지금 내 상태 (예: HSK 3급 수준)
+  current_on text not null default '',
+  milestones jsonb not null default '[]',   -- 성과 목표: [{"id","title","start","due","done","done_on","final"}, …]
   updated_at timestamptz not null,
   deleted    boolean not null default false,
   synced_at  timestamptz not null default clock_timestamp(),
   primary key (user_id, id)
 );
+alter table public.projects add column if not exists note       text  not null default '';
+alter table public.projects add column if not exists current    text  not null default '';
+alter table public.projects add column if not exists current_on text  not null default '';
+alter table public.projects add column if not exists milestones jsonb not null default '[]';
 
 create table if not exists public.tasks (
   user_id    uuid not null default auth.uid() references auth.users on delete cascade,

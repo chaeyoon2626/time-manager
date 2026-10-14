@@ -19,6 +19,18 @@ export type HabitLog = Base & { habit_id: string; date: string };
  */
 export type ProjectKind = 'project' | 'steady';
 export type Target = { from: string; hours: number }; // from = 그 목표가 시작된 주의 월요일
+
+/** 성과 목표 (예: HSK 4급 취득, 기한 12/14). 순서대로 하나씩 달성해 간다 */
+export type Milestone = {
+  id: string;
+  title: string;
+  start: string; // 이 목표를 시작한 날 — 투입 시간을 이날부터 센다
+  due: string; // 기한, '' = 없음
+  done: boolean;
+  done_on: string;
+  final: boolean; // 최종 목표
+};
+
 export type Project = Base & {
   area_id: string;
   title: string;
@@ -28,6 +40,10 @@ export type Project = Base & {
   done_on: string;
   sort: number;
   targets: Target[]; // steady만 사용, from 오름차순
+  note?: string; // 자유 메모 (왜 하는지, 방향, 참고 자료 …)
+  current?: string; // 지금 내 상태 (예: HSK 3급 수준, 단어 600개)
+  current_on?: string; // 현재 상태를 마지막으로 고친 날
+  milestones?: Milestone[]; // 예전 행에는 없을 수 있다
 };
 
 export type Task = Base & {

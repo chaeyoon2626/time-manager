@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react';
 import { ArrowLeft, Check, Play, Plus, Square, Trash2 } from 'lucide-react';
 import { addProject, deleteProject, setTarget, stopTimer, timerForProject, toggleProjectDone, updateProject } from '../actions';
+import { Outcomes } from '../components/Outcomes';
 import { ListHeader, QuickAdd, TaskRow, useTrackedByTask } from '../components/TaskList';
 import { Button, Card, cn, fieldCls } from '../components/ui';
 import { useAlive, useAreaMap, useAreas, useNow, useRunning, useSessions, useToday } from '../hooks';
 import { addDays, dDay, diffDays, fmtDur, fmtShort, fromKey, weekStart } from '../lib/date';
 import { effectiveDue, overlapMin, sumSessions, targetFor } from '../lib/stats';
-import type { Project, ProjectKind } from '../lib/types';
+import type { Project, ProjectKind, Task } from '../lib/types';
 import { useStore } from '../store';
 
 const byKey = (a: string, b: string) => (a === b ? 0 : !a ? 1 : !b ? -1 : a.localeCompare(b));
@@ -256,22 +257,30 @@ function DetailHeader({ p, children }: { p: Project; children?: React.ReactNode 
           <Trash2 className="size-4" />
         </Button>
       </div>
+      <textarea
+        value={p.note ?? ''}
+        onChange={(e) => updateProject(p.id, { note: e.target.value })}
+        rows={3}
+        placeholder={
+          p.kind === 'steady'
+            ? '메모 — 왜 하는지, 지금 급한 것, 순서, 참고할 유튜브·책 … 아무렇게나 적어도 돼요'
+            : '메모 — 이 프로젝트에서 하고 싶은 것, 방향, 참고 자료 … 아무렇게나 적어도 돼요'
+        }
+        className="field-sizing-content mt-1 min-h-20 w-full basis-full resize-y rounded-xl border border-amber-200/70 bg-amber-50/50 px-3.5 py-3 text-sm leading-relaxed whitespace-pre-wrap placeholder:text-zinc-400 focus:border-amber-300 focus:bg-amber-50 focus:outline-none dark:border-amber-500/20 dark:bg-amber-500/[0.05] dark:focus:bg-amber-500/10"
+        aria-label="메모"
+      />
     </div>
   );
 }
 
 function ProjectDetail({ p }: { p: Project }) {
   const today = useToday();
-  const tasksRec = useStore((s) => s.data.tasks);
-  const projects = useStore((s) => s.data.projects);
   const sessions = useSessions();
   const now = useNow();
   const tracked = useTrackedByTask();
-  const tasks = Object.values(tasksRec).filter((t) => !t.deleted && t.project_id === p.id);
-  const open = tasks
-    .filter((t) => !t.done)
-    .sort((a, b) => byKey(effectiveDue(a, projects), effectiveDue(b, projects)) || byKey(a.date, b.date) || Number(b.important) - Number(a.important) || a.sort - b.sort);
-  const done = tasks.filter((t) => t.done).sort((a, b) => b.done_on.localeCompare(a.done_on));
+  const areaMap = useAreaMap();
+  const color = areaMap[p.area_id]?.color ?? '#a1a1aa';
+  const { open, done } = useProjectTasks(p.id);
   const total = sessions.filter((s) => s.project_id === p.id).reduce((n, s) => n + overlapMin(s, 0, Infinity, now), 0);
   const estimate = open.reduce((n, t) => n + t.estimate, 0);
 
@@ -297,8 +306,32 @@ function ProjectDetail({ p }: { p: Project }) {
       </div>
 
       <div className="mt-4">
-        <QuickAdd defaultDate="" projectId={p.id} placeholder={`'${p.title}'에 할 일 추가 — 예: 문항 코드 정리 내일 2h ~10/30`} />
+        <Outcomes p={p} color={color} />
       </div>
+      <ProjectTasks p={p} open={open} done={done} tracked={tracked} placeholder="예: 문항 코드 정리 내일 2h ~10/30" />
+    </Card>
+  );
+}
+
+/** 프로젝트·꾸준히 안의 할 일 목록 + 빠른 입력 */
+function ProjectTasks({
+  p,
+  open,
+  done,
+  tracked,
+  placeholder,
+}: {
+  p: Project;
+  open: Task[];
+  done: Task[];
+  tracked: Record<string, number>;
+  placeholder: string;
+}) {
+  const today = useToday();
+  return (
+    <div className="mt-5">
+      <h3 className="mb-2 text-sm font-bold">할 일</h3>
+      <QuickAdd defaultDate="" projectId={p.id} placeholder={`'${p.title}'에 할 일 추가 — ${placeholder}`} />
       <div className="mt-2">
         <ListHeader />
         <ul>
@@ -318,8 +351,28 @@ function ProjectDetail({ p }: { p: Project }) {
           </details>
         )}
       </div>
-    </Card>
+    </div>
   );
+}
+
+/** 이 프로젝트의 할 일: 남은 것(마감·날짜순), 끝낸 것(최근순) */
+function useProjectTasks(projectId: string) {
+  const tasksRec = useStore((s) => s.data.tasks);
+  const projects = useStore((s) => s.data.projects);
+  return useMemo(() => {
+    const tasks = Object.values(tasksRec).filter((t) => !t.deleted && t.project_id === projectId);
+    const open = tasks
+      .filter((t) => !t.done)
+      .sort(
+        (a, b) =>
+          byKey(effectiveDue(a, projects), effectiveDue(b, projects)) ||
+          byKey(a.date, b.date) ||
+          Number(b.important) - Number(a.important) ||
+          a.sort - b.sort,
+      );
+    const done = tasks.filter((t) => t.done).sort((a, b) => b.done_on.localeCompare(a.done_on));
+    return { open, done };
+  }, [tasksRec, projects, projectId]);
 }
 
 function SteadyDetail({ p }: { p: Project }) {
@@ -331,6 +384,8 @@ function SteadyDetail({ p }: { p: Project }) {
   const current = targetFor(p, ws);
   const [hours, setHours] = useState<number | null>(null);
   const color = areaMap[p.area_id]?.color ?? '#a1a1aa';
+  const tracked = useTrackedByTask();
+  const { open, done } = useProjectTasks(p.id);
 
   // 최근 8주: 실제 vs 그 주 목표
   const weeks = Array.from({ length: 8 }, (_, i) => addDays(ws, -7 * (7 - i)));
@@ -366,7 +421,7 @@ function SteadyDetail({ p }: { p: Project }) {
             setHours(null);
           }}
         >
-          <span className="text-zinc-500">주간 목표</span>
+          <span className="text-zinc-500">주간 투자 시간</span>
           <input
             type="number"
             min={0}
@@ -374,7 +429,7 @@ function SteadyDetail({ p }: { p: Project }) {
             value={hours ?? current}
             onChange={(e) => setHours(Number(e.target.value))}
             className={cn(fieldCls, 'h-8 w-20 px-2')}
-            aria-label="주간 목표 시간"
+            aria-label="주간 투자 시간"
           />
           시간
           <Button type="submit" variant="primary" disabled={hours === null || hours === current}>
@@ -384,7 +439,12 @@ function SteadyDetail({ p }: { p: Project }) {
         <p className="mt-2 text-[11px] text-zinc-400">조금씩 올리다가, 원하는 수준이 되면 그대로 두면 “유지”예요. 바꾼 기록은 아래에 남아요.</p>
       </div>
 
-      <h3 className="mt-6 mb-2 text-xs font-semibold text-zinc-500">최근 8주</h3>
+      <div className="mt-4">
+        <Outcomes p={p} color={color} />
+      </div>
+      <ProjectTasks p={p} open={open} done={done} tracked={tracked} placeholder="예: 단어 50개 오늘 30m, 듣기 모의고사 금요일 1h" />
+
+      <h3 className="mt-6 mb-2 text-xs font-semibold text-zinc-500">최근 8주 투자 시간</h3>
       <div className="grid h-40 grid-cols-8 items-end gap-2">
         {rows.map((r) => (
           <div key={r.w} className="relative flex h-full flex-col items-center justify-end gap-1">
@@ -403,11 +463,11 @@ function SteadyDetail({ p }: { p: Project }) {
           </div>
         ))}
       </div>
-      <p className="mt-1 text-[11px] text-zinc-400">점선 = 그 주 목표</p>
+      <p className="mt-1 text-[11px] text-zinc-400">점선 = 그 주 투자 목표</p>
 
       {(p.targets ?? []).length > 0 && (
         <>
-          <h3 className="mt-6 mb-2 text-xs font-semibold text-zinc-500">목표 변화</h3>
+          <h3 className="mt-6 mb-2 text-xs font-semibold text-zinc-500">주간 투자 시간 변화</h3>
           <ol className="space-y-1 text-sm">
             {[...(p.targets ?? [])].reverse().map((t, i, arr) => {
               const prev = arr[i + 1];

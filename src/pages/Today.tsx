@@ -1,23 +1,44 @@
-import { useMemo } from 'react';
+import { Fragment, useMemo } from 'react';
 import { saveReview } from '../actions';
 import { DateNav } from '../components/DateNav';
 import { DayLog } from '../components/DayLog';
 import { HabitRow, ListHeader, QuickAdd, SectionTitle, SteadyRow, TaskRow, useTrackedByTask } from '../components/TaskList';
-import { Card, Stat, textareaCls } from '../components/ui';
-import { useActiveProjects, useHabits, useLogSet, useNow, useProjectMap, useSessions, useToday } from '../hooks';
-import { addDays, dayBounds, fmtDur, fromKey, weekStart } from '../lib/date';
+import { Card, Stat, cn, textareaCls } from '../components/ui';
+import { useActiveProjects, useAreaMap, useHabits, useLogSet, useNow, useProjectMap, useSessions, useToday } from '../hooks';
+import { addDays, DAY_LABELS, dayBounds, diffDays, fmtDur, fmtShort, fromKey, weekdayIdx, weekStart } from '../lib/date';
 import { logId, reviewId } from '../lib/ids';
 import { effectiveDue, isScheduled, streak, sumSessions } from '../lib/stats';
-import type { Task } from '../lib/types';
+import type { Tables, Task } from '../lib/types';
 import { useStore } from '../store';
 
 /** 빈 값('')은 맨 뒤로 */
 const byKey = (a: string, b: string) => (a === b ? 0 : !a ? 1 : !b ? -1 : a.localeCompare(b));
 
+/** ②의 기준 날짜: 할 날과 마감 중 더 빠른 날 ('' = 날짜 없음) */
+const whenOf = (t: Task, projects: Tables['projects']) => {
+  const ds = [t.date, effectiveDue(t, projects)].filter(Boolean).sort();
+  return ds[0] ?? '';
+};
+
+function DateHeader({ when, today }: { when: string; today: string }) {
+  const n = when ? diffDays(when, today) : null;
+  return (
+    <li className="mt-3 mb-0.5 flex items-baseline gap-2 border-b border-zinc-100 px-3 pb-1 dark:border-zinc-800">
+      <span className="text-[13px] font-bold tabular-nums">{when ? `${fmtShort(when)} (${DAY_LABELS[weekdayIdx(when)]})` : '날짜 없음'}</span>
+      {n !== null && (
+        <span className={cn('text-xs font-semibold tabular-nums', n <= 2 ? 'text-orange-500' : 'text-zinc-400')}>
+          {n === 0 ? '오늘' : n === 1 ? '내일' : n > 0 ? `D-${n}` : `${-n}일 지남`}
+        </span>
+      )}
+    </li>
+  );
+}
+
 export function TodayPage({ date, setDate }: { date: string; setDate: (d: string) => void }) {
   const today = useToday();
   const tasksRec = useStore((s) => s.data.tasks);
   const projects = useProjectMap();
+  const areas = useAreaMap();
   const habits = useHabits();
   const logs = useLogSet();
   const steady = useActiveProjects().filter((p) => p.kind === 'steady');
@@ -41,18 +62,29 @@ export function TodayPage({ date, setDate }: { date: string; setDate: (d: string
           byKey(effectiveDue(a, projects), effectiveDue(b, projects)) ||
           a.sort - b.sort,
       );
+    // ②: 가장 가까운 날짜(할 날·마감 중 빠른 쪽)순, 같은 날짜 안에서는 분류끼리 모은다
+    const groupRank = (t: Task) => {
+      const p = projects[t.project_id];
+      if (!p) return [999, 0] as const; // 일회성은 그날 묶음의 맨 뒤
+      return [areas[p.area_id]?.sort ?? 99, p.sort] as const;
+    };
     const laterList = open
       .filter((t) => !isToday(t))
-      .sort(
-        (a, b) =>
-          byKey(effectiveDue(a, projects), effectiveDue(b, projects)) ||
-          byKey(a.date, b.date) ||
+      .sort((a, b) => {
+        const [ra, sa] = groupRank(a);
+        const [rb, sb] = groupRank(b);
+        return (
+          byKey(whenOf(a, projects), whenOf(b, projects)) ||
+          ra - rb ||
+          sa - sb ||
           Number(b.important) - Number(a.important) ||
-          a.sort - b.sort,
-      );
+          byKey(a.time, b.time) ||
+          a.sort - b.sort
+        );
+      });
     const doneList = all.filter((t) => t.done && (t.done_on === date || (!t.done_on && t.date === date)));
     return { todayList, laterList, doneList };
-  }, [tasksRec, projects, date, today]);
+  }, [tasksRec, projects, areas, date, today]);
 
   const todaysHabits = habits.filter((h) => isScheduled(h, date));
   const habitDone = todaysHabits.filter((h) => logs.has(logId(h.id, date))).length;
@@ -96,9 +128,16 @@ export function TodayPage({ date, setDate }: { date: string; setDate: (d: string
 
             <SectionTitle n={2} title="프로젝트 할 일 · 다가오는 일" right={laterList.length ? `마감순 · ${laterList.length}개` : undefined} />
             <ul>
-              {laterList.map((t) => (
-                <TaskRow key={t.id} task={t} today={today} viewDate={date} tracked={tracked[t.id] ?? 0} pinnable />
-              ))}
+              {laterList.map((t, i) => {
+                const when = whenOf(t, projects);
+                const newGroup = i === 0 || whenOf(laterList[i - 1], projects) !== when;
+                return (
+                  <Fragment key={t.id}>
+                    {newGroup && <DateHeader when={when} today={today} />}
+                    <TaskRow task={t} today={today} viewDate={date} tracked={tracked[t.id] ?? 0} pinnable hideDate />
+                  </Fragment>
+                );
+              })}
               {laterList.length === 0 && (
                 <li className="px-3 py-3 text-sm text-zinc-400">
                   남은 일이 없어요. <a href="#projects" className="underline">프로젝트</a>에서 할 일을 적어두면 마감순으로 여기 모여요.
