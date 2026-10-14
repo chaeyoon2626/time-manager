@@ -20,6 +20,19 @@ export const weekDays = (k: string) => {
   const s = weekStart(k);
   return Array.from({ length: 7 }, (_, i) => addDays(s, i));
 };
+/** 그 날짜가 속한 달의 모든 날 */
+export const monthDays = (k: string) => {
+  const d = fromKey(k);
+  const n = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  return Array.from({ length: n }, (_, i) => toKey(new Date(d.getFullYear(), d.getMonth(), i + 1)));
+};
+
+/** 마감까지 남은 날: D-3, D-day, D+2(지남) */
+export const dDay = (due: string, today: string) => {
+  const n = diffDays(due, today);
+  return n === 0 ? 'D-day' : n > 0 ? `D-${n}` : `D+${-n}`;
+};
+
 export const fmtMD = (k: string) => {
   const d = fromKey(k);
   return `${d.getMonth() + 1}월 ${d.getDate()}일`;
@@ -34,6 +47,25 @@ export function isoWeek(k: string) {
   const jan1 = new Date(thu.getFullYear(), 0, 1);
   return Math.floor((thu.getTime() - jan1.getTime()) / 86_400_000 / 7) + 1;
 }
+/** 분 → "45m", "1h", "1h 30m" */
+export const fmtDur = (min: number) => {
+  const m = Math.round(min);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  return m % 60 ? `${h}h ${m % 60}m` : `${h}h`;
+};
+/** Date → "09:05" */
+export const hhmm = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+/** 그 날 00:00 ~ 다음 날 00:00 (ms) */
+export const dayBounds = (k: string): [number, number] => [fromKey(k).getTime(), fromKey(addDays(k, 1)).getTime()];
+/** 날짜 + "HH:MM" → ISO */
+export const atTime = (k: string, time: string) => {
+  const [h, m] = time.split(':').map(Number);
+  const d = fromKey(k);
+  d.setHours(h, m, 0, 0);
+  return d.toISOString();
+};
+
 export const slotLabel = (slot: number) => `${pad(Math.floor(slot / 2))}:${slot % 2 ? '30' : '00'}`;
 /** 30분 칸 개수 → "3.5h" */
 export const hours = (slots: number) => {

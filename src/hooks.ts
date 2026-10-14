@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { todayKey } from './lib/date';
-import type { Activity, Area, Habit, RowOf, TableName } from './lib/types';
+import type { Area, Habit, Project, RowOf, Session, TableName } from './lib/types';
 import { useStore } from './store';
 
 export function useAlive<T extends TableName>(table: T): RowOf<T>[] {
@@ -13,22 +13,21 @@ export function useAreas(): Area[] {
   return useMemo(() => [...list].sort((a, b) => a.sort - b.sort), [list]);
 }
 
-/** 보관하지 않은 세부 항목, 영역별로 묶어서 */
-export function useActivitiesByArea() {
-  const list = useAlive('activities');
-  return useMemo(() => {
-    const by: Record<string, Activity[]> = {};
-    for (const a of [...list].filter((x) => !x.archived).sort((x, y) => x.sort - y.sort)) (by[a.area_id] ??= []).push(a);
-    return by;
-  }, [list]);
-}
+/** 지운 범주도 들어 있다 — 예전 기록의 색·이름을 보여주려고 */
+export const useAreaMap = () => useStore((s) => s.data.areas);
+export const useProjectMap = () => useStore((s) => s.data.projects);
 
-export function useActivityMap() {
-  return useStore((s) => s.data.activities);
-}
-
-export function useAreaMap() {
-  return useStore((s) => s.data.areas);
+/** 진행 중인(완료 안 한) 프로젝트·꾸준히, 범주 순 → 만든 순 */
+export function useActiveProjects(): Project[] {
+  const list = useAlive('projects');
+  const areas = useStore((s) => s.data.areas);
+  return useMemo(
+    () =>
+      list
+        .filter((p) => !p.done)
+        .sort((a, b) => (areas[a.area_id]?.sort ?? 99) - (areas[b.area_id]?.sort ?? 99) || a.sort - b.sort),
+    [list, areas],
+  );
 }
 
 export function useHabits(includeArchived = false): Habit[] {
@@ -45,13 +44,20 @@ export function useLogSet() {
   return useMemo(() => new Set(Object.values(rec).filter((r) => !r.deleted).map((r) => r.id)), [rec]);
 }
 
-/** 1분마다 갱신되는 현재 시각 (자정이 지나면 '오늘'도 바뀐다) */
-export function useNow() {
-  const [now, setNow] = useState(() => new Date());
+export const useSessions = (): Session[] => useAlive('sessions');
+
+export function useRunning(): Session | undefined {
+  const list = useSessions();
+  return useMemo(() => list.find((s) => !s.end), [list]);
+}
+
+/** ms마다 갱신되는 현재 시각 (자정이 지나면 '오늘'도 바뀐다) */
+export function useNow(ms = 60_000) {
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 60_000);
+    const t = setInterval(() => setNow(Date.now()), ms);
     return () => clearInterval(t);
-  }, []);
+  }, [ms]);
   return now;
 }
 

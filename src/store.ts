@@ -4,6 +4,7 @@ import { del, get, set } from 'idb-keyval';
 import { DEFAULT_AREAS } from './lib/defaults';
 import type { NewRow, RowOf, TableName, Tables } from './lib/types';
 
+/** startHour~endHour: 하루 기록 막대에 보여줄 시간 범위 */
 export type Settings = { startHour: number; endHour: number };
 export type SyncStatus = 'local' | 'signed-out' | 'syncing' | 'synced' | 'offline' | 'error';
 
@@ -27,8 +28,71 @@ export type State = Persisted & {
 const EPOCH = new Date(0).toISOString();
 
 export const emptyTables = (): Tables => ({
-  areas: {}, activities: {}, habits: {}, habit_logs: {}, tasks: {}, time_blocks: {}, reviews: {}, bucket_items: {},
+  areas: {}, habits: {}, habit_logs: {}, projects: {}, tasks: {}, sessions: {}, reviews: {}, bucket_items: {}, time_blocks: {},
 });
+
+/**
+ * v3: 할 일·시간 기록 구조가 바뀌었다.
+ *  - 할 일: 4칸(quadrant) → ★중요(1·2칸이던 것), 마감·예상 시간·프로젝트 칸 추가
+ *  - 칠하던 타임바(실제 칸) → 이어진 칸끼리 묶어 타이머 기록(세션)으로 옮긴다
+ */
+function migrateV3(p: Persisted): Persisted {
+  const data = { ...emptyTables(), ...p.data } as Tables & Record<string, unknown>;
+  const dirty = { ...p.dirty };
+  const now = new Date().toISOString();
+
+  const tasks: Tables['tasks'] = {};
+  for (const [id, raw] of Object.entries(data.tasks)) {
+    const t = raw as Partial<Tables['tasks'][string]> & { quadrant?: string };
+    tasks[id] = {
+      id,
+      title: t.title ?? '',
+      project_id: t.project_id ?? '',
+      date: t.date ?? '',
+      due: t.due ?? '',
+      time: t.time ?? '',
+      estimate: t.estimate ?? 0,
+      important: t.important ?? (t.quadrant === 'q1' || t.quadrant === 'q2'),
+      done: t.done ?? false,
+      done_on: t.done_on ?? (t.done ? (t.date ?? '') : ''),
+      sort: t.sort ?? 0,
+      updated_at: now,
+      deleted: t.deleted ?? false,
+    };
+    dirty[`tasks:${id}`] = true;
+  }
+
+  const sessions: Tables['sessions'] = { ...data.sessions };
+  const runs = new Map<string, { date: string; area: string; from: number; to: number }[]>();
+  const actual = Object.values(data.time_blocks).filter((b) => !b.deleted && b.kind === 'actual');
+  actual.sort((a, b) => a.date.localeCompare(b.date) || a.slot - b.slot);
+  for (const b of actual) {
+    const list = runs.get(b.date) ?? [];
+    const last = list[list.length - 1];
+    if (last && last.area === b.area_id && last.to === b.slot) last.to = b.slot + 1;
+    else list.push({ date: b.date, area: b.area_id, from: b.slot, to: b.slot + 1 });
+    runs.set(b.date, list);
+  }
+  for (const list of runs.values()) {
+    for (const r of list) {
+      const [y, m, d] = r.date.split('-').map(Number);
+      const at = (slot: number) => new Date(y, m - 1, d, 0, slot * 30).toISOString();
+      const id = `tb_${r.date}_${r.from}`;
+      sessions[id] = {
+        id, task_id: '', project_id: '', area_id: r.area, habit_id: '', title: '',
+        start: at(r.from), end: at(r.to), updated_at: now, deleted: false,
+      };
+      dirty[`sessions:${id}`] = true;
+    }
+  }
+
+  // 없어진 테이블(세부 항목·목표)과 그 대기열은 버린다
+  delete data.activities;
+  delete data.goals;
+  for (const k of Object.keys(dirty)) if (k.startsWith('activities:') || k.startsWith('goals:')) delete dirty[k];
+
+  return { ...p, data: { ...data, tasks, sessions } as Tables, dirty };
+}
 
 // 기본 영역은 EPOCH 시각으로 넣어서, 다른 기기에서 고친 값이 항상 이기게 한다
 function withDefaults(data: Tables): Tables {
@@ -96,10 +160,12 @@ export const useStore = create<State>()(
     }),
     {
       name: 'focus-planner',
-      version: 2,
+      version: 3,
       migrate: (persisted, version) => {
-        const p = persisted as Persisted;
-        if (version < 2 && p?.data) p.data = migrateAreasV2(p.data);
+        let p = persisted as Persisted;
+        if (!p?.data) return p;
+        if (version < 2) p = { ...p, data: migrateAreasV2(p.data) };
+        if (version < 3) p = migrateV3(p);
         return p;
       },
       storage,

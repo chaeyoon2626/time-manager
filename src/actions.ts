@@ -1,7 +1,8 @@
-import { todayKey } from './lib/date';
+import { todayKey, weekStart } from './lib/date';
 import { MAX_AREAS } from './lib/defaults';
-import { blockId, logId, reviewId, uid } from './lib/ids';
-import type { Activity, Area, BlockKind, BucketItem, Habit, Quadrant, Review, ReviewLevel, Tables, Task, TimeBlock } from './lib/types';
+import { logId, reviewId, uid } from './lib/ids';
+import { parseTask } from './lib/parse';
+import type { Area, BucketItem, Habit, Project, ProjectKind, Review, ReviewLevel, Session, Task } from './lib/types';
 import { TABLES } from './lib/types';
 import { patchRow, putRows, useStore, type Settings } from './store';
 
@@ -21,96 +22,119 @@ export function addHabit(title: string, area_id: string, weekdays: number[] = []
 
 export const updateHabit = (id: string, patch: Partial<Habit>) => patchRow('habits', id, patch);
 
-// ---------- 포커스 보드 ----------
+// ---------- 할 일 ----------
 
-export function addTask(date: string, quadrant: Quadrant, title: string) {
-  putRows('tasks', [{ id: uid(), date, quadrant, title, done: false, sort: Date.now() }]);
+const activeProjects = () => Object.values(data().projects).filter((p) => !p.deleted && !p.done && p.kind === 'project');
+
+/**
+ * 한 줄 입력으로 할 일 추가.
+ * 날짜를 안 적었을 때: 프로젝트 할 일이면 '날짜 미정', 일회성이면 defaultDate(보통 보고 있는 날)
+ */
+export function addTaskFromText(text: string, opts: { defaultDate: string; projectId?: string }) {
+  const p = parseTask(text, activeProjects());
+  if (!p.title) return null;
+  const project_id = p.project_id ?? opts.projectId ?? '';
+  const task: Omit<Task, 'updated_at' | 'deleted'> = {
+    id: uid(),
+    title: p.title,
+    project_id,
+    date: p.date ?? (project_id ? '' : opts.defaultDate),
+    due: p.due ?? '',
+    time: p.time ?? '',
+    estimate: p.estimate ?? 0,
+    important: p.important ?? false,
+    done: false,
+    done_on: '',
+    sort: Date.now(),
+  };
+  putRows('tasks', [task]);
+  return task.id;
 }
 
 export const updateTask = (id: string, patch: Partial<Task>) => patchRow('tasks', id, patch);
 export const deleteTask = (id: string) => patchRow('tasks', id, { deleted: true });
+export const toggleTask = (t: Task) =>
+  updateTask(t.id, t.done ? { done: false, done_on: '' } : { done: true, done_on: todayKey() });
 
-export const overdueTasks = (tasks: Tables['tasks'], date: string) =>
-  Object.values(tasks).filter((t) => !t.deleted && !t.done && t.date < date);
+// ---------- 프로젝트 · 꾸준히 ----------
 
-/** 지난 날짜의 미완료 할 일을 date로 옮긴다 */
-export function pullOverdue(date: string) {
-  putRows('tasks', overdueTasks(data().tasks, date).map((t) => ({ ...t, date })));
-}
-
-// ---------- 타임바 ----------
-
-/** 붓: 영역 + (선택) 세부 항목. activity가 ''이면 영역만 */
-export type Brush = { area: string; activity: string };
-
-/** brush가 null이면 지우기 */
-export function setBlocks(date: string, kind: BlockKind, slots: number[], brush: Brush | null) {
-  const blocks = data().time_blocks;
-  const rows: Omit<TimeBlock, 'updated_at'>[] = [];
-  for (const slot of slots) {
-    const id = blockId(date, kind, slot);
-    const cur = blocks[id];
-    const alive = cur && !cur.deleted;
-    if (brush === null) {
-      if (alive) rows.push({ ...cur, activity_id: cur.activity_id ?? '', deleted: true });
-    } else if (!alive || cur.area_id !== brush.area || (cur.activity_id ?? '') !== brush.activity) {
-      rows.push({ id, date, kind, slot, area_id: brush.area, activity_id: brush.activity, deleted: false });
-    }
-  }
-  putRows('time_blocks', rows);
-}
-
-/** 실제 칸이 비어 있는 곳만 계획대로 채운다 */
-export function copyPlanToActual(date: string) {
-  const blocks = data().time_blocks;
-  const rows: Omit<TimeBlock, 'updated_at'>[] = [];
-  for (let s = 0; s < 48; s++) {
-    const p = blocks[blockId(date, 'plan', s)];
-    const a = blocks[blockId(date, 'actual', s)];
-    if (p && !p.deleted && (!a || a.deleted)) {
-      rows.push({
-        id: blockId(date, 'actual', s),
-        date,
-        kind: 'actual',
-        slot: s,
-        area_id: p.area_id,
-        activity_id: p.activity_id ?? '',
-        deleted: false,
-      });
-    }
-  }
-  putRows('time_blocks', rows);
-}
-
-// ---------- 세부 항목 ----------
-
-/** 같은 영역에 같은 이름이 있으면(보관한 것 포함) 그걸 되살려 쓴다 */
-export function addActivity(area_id: string, name: string): string {
-  const same = Object.values(data().activities).find(
-    (a) => !a.deleted && a.area_id === area_id && a.name.trim() === name.trim(),
-  );
-  if (same) {
-    if (same.archived) patchRow('activities', same.id, { archived: false });
-    return same.id;
-  }
+export function addProject(title: string, area_id: string, kind: ProjectKind, due = '', hours = 0) {
   const id = uid();
-  putRows('activities', [{ id, area_id, name: name.trim(), sort: Date.now(), archived: false }]);
+  putRows('projects', [
+    {
+      id, title: title.trim(), area_id, kind, due, done: false, done_on: '', sort: Date.now(),
+      targets: kind === 'steady' && hours > 0 ? [{ from: weekStart(todayKey()), hours }] : [],
+    },
+  ]);
   return id;
 }
 
-export const updateActivity = (id: string, patch: Partial<Activity>) => patchRow('activities', id, patch);
+export const updateProject = (id: string, patch: Partial<Project>) => patchRow('projects', id, patch);
+export const deleteProject = (id: string) => patchRow('projects', id, { deleted: true });
+export const toggleProjectDone = (p: Project) =>
+  updateProject(p.id, p.done ? { done: false, done_on: '' } : { done: true, done_on: todayKey() });
 
-/** 보관만 한다 — 이미 칠한 칸은 그 이름을 계속 보여준다 */
-export const archiveActivity = (id: string) => patchRow('activities', id, { archived: true });
-
-// ---------- 회고 ----------
-
-export function saveReview(level: ReviewLevel, period_key: string, patch: Partial<Review>) {
-  const id = reviewId(level, period_key);
-  const cur = data().reviews[id];
-  const base = cur ?? { id, level, period_key, line: '', good: '', bad: '', why: '', next_action: '' };
-  putRows('reviews', [{ ...base, ...patch, deleted: false }]);
+/** 꾸준히 목표 변경: 이번 주부터 적용. 이전 목표는 기록으로 남는다 */
+export function setTarget(p: Project, hours: number) {
+  const from = weekStart(todayKey());
+  const targets = (p.targets ?? []).filter((t) => t.from !== from);
+  targets.push({ from, hours });
+  targets.sort((a, b) => a.from.localeCompare(b.from));
+  updateProject(p.id, { targets });
 }
+
+// ---------- 타이머 ----------
+
+export const runningSession = (): Session | undefined =>
+  Object.values(data().sessions).find((s) => !s.deleted && !s.end);
+
+export type TimerTarget = { task_id?: string; project_id?: string; area_id?: string; habit_id?: string; title: string };
+
+/** 1분도 안 된 기록은 실수로 누른 것으로 보고 지운다 */
+const endRun = (run: Session, now: string): Omit<Session, 'updated_at'> => ({
+  ...run,
+  end: now,
+  deleted: Date.parse(now) - Date.parse(run.start) < 60_000,
+});
+
+/** 시작하면 돌던 타이머는 지금 시각으로 끝낸다 (하나만 돈다) */
+export function startTimer(t: TimerTarget) {
+  const now = new Date().toISOString();
+  const rows: Omit<Session, 'updated_at'>[] = [];
+  const run = runningSession();
+  if (run) rows.push(endRun(run, now));
+  rows.push({
+    id: uid(),
+    task_id: t.task_id ?? '',
+    project_id: t.project_id ?? '',
+    area_id: t.area_id ?? '',
+    habit_id: t.habit_id ?? '',
+    title: t.title,
+    start: now,
+    end: '',
+    deleted: false,
+  });
+  putRows('sessions', rows);
+}
+
+export function stopTimer() {
+  const run = runningSession();
+  if (run) putRows('sessions', [endRun(run, new Date().toISOString())]);
+}
+
+export function addSession(s: Omit<Session, 'id' | 'updated_at' | 'deleted'>) {
+  putRows('sessions', [{ ...s, id: uid() }]);
+}
+export const updateSession = (id: string, patch: Partial<Session>) => patchRow('sessions', id, patch);
+export const deleteSession = (id: string) => patchRow('sessions', id, { deleted: true });
+
+/** 할 일·습관·꾸준히 중 무엇에 대한 타이머인지 → 범주·프로젝트를 채워서 시작 */
+export function timerForTask(t: Task) {
+  const p = data().projects[t.project_id];
+  startTimer({ task_id: t.id, project_id: t.project_id, area_id: p?.area_id ?? '', title: t.title });
+}
+export const timerForProject = (p: Project) => startTimer({ project_id: p.id, area_id: p.area_id, title: p.title });
+export const timerForHabit = (h: Habit) => startTimer({ habit_id: h.id, area_id: h.area_id, title: h.title });
 
 // ---------- 버킷리스트 ----------
 
@@ -124,10 +148,25 @@ export const deleteBucket = (id: string) => patchRow('bucket_items', id, { delet
 export const toggleBucket = (b: BucketItem) =>
   updateBucket(b.id, b.done ? { done: false, done_on: '' } : { done: true, done_on: todayKey() });
 
-/** 버킷리스트 항목을 오늘 포커스 보드의 '성장 투자' 칸에 넣는다 */
-export const bucketToToday = (b: BucketItem) => addTask(todayKey(), 'q2', b.title);
+/** 버킷리스트 항목을 오늘 할 일(일회성)로 넣는다 */
+export const bucketToToday = (b: BucketItem) =>
+  putRows('tasks', [
+    {
+      id: uid(), title: b.title, project_id: '', date: todayKey(), due: '', time: '', estimate: b.minutes,
+      important: false, done: false, done_on: '', sort: Date.now(),
+    },
+  ]);
 
-// ---------- 설정 ----------
+// ---------- 회고 ----------
+
+export function saveReview(level: ReviewLevel, period_key: string, patch: Partial<Review>) {
+  const id = reviewId(level, period_key);
+  const cur = data().reviews[id];
+  const base = cur ?? { id, level, period_key, line: '', good: '', bad: '', why: '', next_action: '' };
+  putRows('reviews', [{ ...base, ...patch, deleted: false }]);
+}
+
+// ---------- 범주 · 설정 ----------
 
 export const updateArea = (id: string, patch: Partial<Area>) => patchRow('areas', id, patch);
 
@@ -141,19 +180,19 @@ export function addArea(name: string, color: string): string | null {
   return id;
 }
 
-/** 범주 삭제 — 목록·붓에서만 빠진다. 이미 칠한 칸은 원래 이름과 색으로 남는다 */
+/** 범주 삭제 — 목록에서만 빠진다. 이미 쌓인 기록은 원래 이름과 색으로 남는다 */
 export const deleteArea = (id: string) => patchRow('areas', id, { deleted: true });
 
 export const updateSettings = (patch: Partial<Settings>) =>
   useStore.setState((s) => ({ settings: { ...s.settings, ...patch } }));
 
 export function exportData() {
-  const blob = new Blob([JSON.stringify({ app: 'focus-planner', version: 1, data: data() }, null, 1)], {
+  const blob = new Blob([JSON.stringify({ app: 'focus-planner', version: 3, data: data() }, null, 1)], {
     type: 'application/json',
   });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `focus-planner-${todayKey()}.json`;
+  a.download = `time-manager-${todayKey()}.json`;
   a.click();
   URL.revokeObjectURL(a.href);
 }
@@ -161,7 +200,7 @@ export function exportData() {
 /** 백업 파일을 현재 데이터 위에 덮어쓴다 (같은 id는 백업 값으로) */
 export async function importData(file: File) {
   const parsed = JSON.parse(await file.text());
-  if (parsed?.app !== 'focus-planner' || !parsed.data) throw new Error('포커스 플래너 백업 파일이 아니에요.');
+  if (parsed?.app !== 'focus-planner' || !parsed.data) throw new Error('이 앱의 백업 파일이 아니에요.');
   for (const t of TABLES) {
     const rows = Object.values(parsed.data[t] ?? {}) as never[];
     putRows(t, rows);

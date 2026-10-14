@@ -1,61 +1,140 @@
 import { useMemo } from 'react';
 import { saveReview } from '../actions';
 import { DateNav } from '../components/DateNav';
-import { FocusBoard } from '../components/FocusBoard';
-import { HabitToday } from '../components/HabitToday';
-import { TimeBar } from '../components/TimeBar';
+import { DayLog } from '../components/DayLog';
+import { HabitRow, ListHeader, QuickAdd, SectionTitle, SteadyRow, TaskRow, useTrackedByTask } from '../components/TaskList';
 import { Card, Stat, textareaCls } from '../components/ui';
-import { useAreaMap, useHabits, useLogSet } from '../hooks';
-import { hours } from '../lib/date';
+import { useActiveProjects, useHabits, useLogSet, useNow, useProjectMap, useSessions, useToday } from '../hooks';
+import { addDays, dayBounds, fmtDur, fromKey, weekStart } from '../lib/date';
 import { logId, reviewId } from '../lib/ids';
-import { dayBlocks, isScheduled, pct } from '../lib/stats';
+import { effectiveDue, isScheduled, streak, sumSessions } from '../lib/stats';
+import type { Task } from '../lib/types';
 import { useStore } from '../store';
 
+/** 빈 값('')은 맨 뒤로 */
+const byKey = (a: string, b: string) => (a === b ? 0 : !a ? 1 : !b ? -1 : a.localeCompare(b));
+
 export function TodayPage({ date, setDate }: { date: string; setDate: (d: string) => void }) {
+  const today = useToday();
+  const tasksRec = useStore((s) => s.data.tasks);
+  const projects = useProjectMap();
+  const habits = useHabits();
+  const logs = useLogSet();
+  const steady = useActiveProjects().filter((p) => p.kind === 'steady');
+  const sessions = useSessions();
+  const now = useNow();
+  const tracked = useTrackedByTask();
+
+  const { todayList, laterList, doneList } = useMemo(() => {
+    const all = Object.values(tasksRec).filter((t) => !t.deleted);
+    const isToday = (t: Task) =>
+      t.date === date || t.due === date || (date === today && ((!!t.date && t.date < today) || (!!t.due && t.due < today)));
+    const late = (t: Task) => (!!t.date && t.date < today) || (!!t.due && t.due < today);
+    const open = all.filter((t) => !t.done);
+    const todayList = open
+      .filter(isToday)
+      .sort(
+        (a, b) =>
+          Number(late(b)) - Number(late(a)) ||
+          byKey(a.time, b.time) ||
+          Number(b.important) - Number(a.important) ||
+          byKey(effectiveDue(a, projects), effectiveDue(b, projects)) ||
+          a.sort - b.sort,
+      );
+    const laterList = open
+      .filter((t) => !isToday(t))
+      .sort(
+        (a, b) =>
+          byKey(effectiveDue(a, projects), effectiveDue(b, projects)) ||
+          byKey(a.date, b.date) ||
+          Number(b.important) - Number(a.important) ||
+          a.sort - b.sort,
+      );
+    const doneList = all.filter((t) => t.done && (t.done_on === date || (!t.done_on && t.date === date)));
+    return { todayList, laterList, doneList };
+  }, [tasksRec, projects, date, today]);
+
+  const todaysHabits = habits.filter((h) => isScheduled(h, date));
+  const habitDone = todaysHabits.filter((h) => logs.has(logId(h.id, date))).length;
+  const planned = [...todayList, ...doneList].reduce((n, t) => n + t.estimate, 0);
+  const [from, to] = dayBounds(date);
+  const actual = sumSessions(sessions, from, to, now).total;
+  const ws = weekStart(date);
+  const week = sumSessions(sessions, fromKey(ws).getTime(), fromKey(addDays(ws, 7)).getTime(), now);
+
   return (
     <div className="space-y-4">
       <DateNav date={date} setDate={setDate} mode="day" />
-      <DaySummary date={date} />
-      {/* 핵심은 습관 + 시간 기록: 폰에서는 습관 → 타임바 → 할 일 → 회고 순서,
-          넓은 화면에서는 타임바를 오른쪽에 고정 (왼쪽 묶음은 폰에서 display:contents로 풀린다) */}
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
-        <div className="contents lg:block lg:space-y-4">
-          <div className="order-1">
-            <HabitToday date={date} />
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Stat label="예정 시간" value={planned ? fmtDur(planned) : '–'} sub="예상 합계" />
+        <Stat label="실제 시간" value={fmtDur(actual)} sub="타이머 기록" />
+        <Stat label="할 일" value={doneList.length} sub={`/ ${todayList.length + doneList.length}개`} />
+        <Stat label="습관" value={habitDone} sub={`/ ${todaysHabits.length}개`} />
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
+        <section className="rounded-2xl border border-zinc-200/80 bg-white p-3 sm:p-4 dark:border-zinc-800 dark:bg-zinc-900">
+          <QuickAdd defaultDate={date} />
+          <div className="mt-3">
+            <ListHeader />
+            <SectionTitle
+              n={1}
+              title={date === today ? '오늘 할 일 · 오늘 마감' : '이 날 할 일 · 마감'}
+              right={todayList.length + todaysHabits.length > 0 ? `${todayList.length + todaysHabits.length}개` : undefined}
+            />
+            <ul>
+              {todayList.map((t) => (
+                <TaskRow key={t.id} task={t} today={today} viewDate={date} tracked={tracked[t.id] ?? 0} />
+              ))}
+              {todaysHabits.map((h) => (
+                <HabitRow key={h.id} habit={h} date={date} logs={logs} streakDays={streak(h, logs, date)} />
+              ))}
+              {todayList.length + todaysHabits.length === 0 && (
+                <li className="px-3 py-3 text-sm text-zinc-400">비어 있어요. 위에 바로 적거나, 아래 ②에서 <b>오늘</b>을 눌러 가져오세요.</li>
+              )}
+            </ul>
+
+            <SectionTitle n={2} title="프로젝트 할 일 · 다가오는 일" right={laterList.length ? `마감순 · ${laterList.length}개` : undefined} />
+            <ul>
+              {laterList.map((t) => (
+                <TaskRow key={t.id} task={t} today={today} viewDate={date} tracked={tracked[t.id] ?? 0} pinnable />
+              ))}
+              {laterList.length === 0 && (
+                <li className="px-3 py-3 text-sm text-zinc-400">
+                  남은 일이 없어요. <a href="#projects" className="underline">프로젝트</a>에서 할 일을 적어두면 마감순으로 여기 모여요.
+                </li>
+              )}
+            </ul>
+
+            {steady.length > 0 && (
+              <>
+                <SectionTitle n={3} title="꾸준히 · 이번 주 목표" />
+                <ul>
+                  {steady.map((p) => (
+                    <SteadyRow key={p.id} project={p} today={today} weekMinutes={week.byProject[p.id] ?? 0} />
+                  ))}
+                </ul>
+              </>
+            )}
+
+            {doneList.length > 0 && (
+              <details className="mt-4 px-1">
+                <summary className="cursor-pointer py-1 text-xs font-medium text-zinc-400">완료 {doneList.length}개</summary>
+                <ul className="-mx-1">
+                  {doneList.map((t) => (
+                    <TaskRow key={t.id} task={t} today={today} viewDate={date} tracked={tracked[t.id] ?? 0} />
+                  ))}
+                </ul>
+              </details>
+            )}
           </div>
-          <div className="order-3">
-            <FocusBoard date={date} />
-          </div>
-          <div className="order-4">
-            <DailyReview date={date} />
-          </div>
-        </div>
-        <div className="order-2 lg:sticky lg:top-[72px]">
-          <TimeBar date={date} />
+        </section>
+
+        <div className="space-y-4 lg:sticky lg:top-[72px]">
+          <DayLog date={date} />
+          <DailyReview date={date} />
         </div>
       </div>
-    </div>
-  );
-}
-
-function DaySummary({ date }: { date: string }) {
-  const habits = useHabits();
-  const logs = useLogSet();
-  const tasksRec = useStore((s) => s.data.tasks);
-  const blocks = useStore((s) => s.data.time_blocks);
-  const areaMap = useAreaMap();
-
-  const on = habits.filter((h) => isScheduled(h, date));
-  const habitDone = on.filter((h) => logs.has(logId(h.id, date))).length;
-  const tasks = useMemo(() => Object.values(tasksRec).filter((t) => !t.deleted && t.date === date), [tasksRec, date]);
-  const b = dayBlocks(blocks, areaMap, date);
-
-  return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-      <Stat label="습관" value={`${pct(habitDone, on.length)}%`} sub={`${habitDone}/${on.length}`} />
-      <Stat label="할 일" value={tasks.filter((t) => t.done).length} sub={`/ ${tasks.length}개`} />
-      <Stat label="집중 시간" value={hours(b.focus)} sub={b.actualTotal > b.focus ? `낭비 ${hours(b.actualTotal - b.focus)}` : undefined} />
-      <Stat label="계획 실행률" value={b.planTotal ? `${pct(b.matched, b.planTotal)}%` : '–'} sub={b.planTotal ? `계획 ${hours(b.planTotal)}` : '계획 없음'} />
     </div>
   );
 }
@@ -63,9 +142,9 @@ function DaySummary({ date }: { date: string }) {
 function DailyReview({ date }: { date: string }) {
   const review = useStore((s) => s.data.reviews[reviewId('day', date)]);
   return (
-    <Card title="오늘 한 줄 회고">
+    <Card title="한 줄 회고">
       <textarea
-        rows={3}
+        rows={2}
         value={review?.line ?? ''}
         onChange={(e) => saveReview('day', date, { line: e.target.value })}
         placeholder="오늘 시간을 잘 쓴 점, 아쉬운 점, 내일 바꿀 한 가지"

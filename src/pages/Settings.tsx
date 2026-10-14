@@ -1,10 +1,8 @@
 import { useRef, useState } from 'react';
-import { Archive, ArchiveRestore, Download, Trash2, Upload, X } from 'lucide-react';
+import { Archive, ArchiveRestore, Download, Trash2, Upload } from 'lucide-react';
 import {
-  addActivity,
   addArea,
   addHabit,
-  archiveActivity,
   deleteArea,
   exportData,
   importData,
@@ -13,11 +11,11 @@ import {
   updateSettings,
 } from '../actions';
 import { Button, Card, Switch, cn, fieldCls, inputCls } from '../components/ui';
-import { useActivitiesByArea, useAreas, useHabits } from '../hooks';
+import { useAreas, useHabits } from '../hooks';
 import { DAY_LABELS } from '../lib/date';
 import { AREA_PALETTE, MAX_AREAS } from '../lib/defaults';
 import { supabase } from '../lib/supabase';
-import type { Activity, Habit } from '../lib/types';
+import type { Habit } from '../lib/types';
 import { useStore } from '../store';
 import { syncNow } from '../sync';
 
@@ -126,7 +124,6 @@ function AuthForm() {
 
 function Areas() {
   const areas = useAreas();
-  const acts = useActivitiesByArea();
   const used = new Set(areas.map((a) => a.color));
   const nextColor = AREA_PALETTE.find((c) => !used.has(c)) ?? AREA_PALETTE[0];
   const [name, setName] = useState('');
@@ -136,7 +133,7 @@ function Areas() {
   return (
     <Card title={`범주 ${areas.length}/${MAX_AREAS}`}>
       <p className="mb-3 text-xs text-zinc-400">
-        시간·습관을 나누는 큰 칸이에요. 범주 안의 <b>세부 항목</b>(예: 공부 → 독서, 영어)은 타임바에서 시간이 따로 합산돼요.{' '}
+        시간·습관·프로젝트를 나누는 큰 칸이에요. 프로젝트(MST 등)와 꾸준히(영어 등)는 각각 범주 하나에 들어가요.{' '}
         <b>필수</b>를 켜면 그 주에 기록이 없을 때 “기록 없음”으로 알려줘요.
       </p>
       <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
@@ -166,7 +163,6 @@ function Areas() {
                 </Button>
               </div>
             </div>
-            <ActivityChips areaId={a.id} color={a.color} list={acts[a.id] ?? []} />
           </li>
         ))}
       </ul>
@@ -193,37 +189,6 @@ function Areas() {
         </form>
       )}
     </Card>
-  );
-}
-
-function ActivityChips({ areaId, color, list }: { areaId: string; color: string; list: Activity[] }) {
-  const [text, setText] = useState('');
-  return (
-    <div className="mt-2 flex flex-wrap items-center gap-1.5 pl-10">
-      {list.map((act) => (
-        <span key={act.id} className="flex h-6 items-center gap-1 rounded-full pr-1 pl-2.5 text-xs" style={{ background: `${color}1a` }}>
-          {act.name}
-          <button aria-label={`${act.name} 빼기`} onClick={() => archiveActivity(act.id)} className="rounded-full p-0.5 text-zinc-400 hover:text-rose-500">
-            <X className="size-3" />
-          </button>
-        </span>
-      ))}
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (!text.trim()) return;
-          addActivity(areaId, text);
-          setText('');
-        }}
-      >
-        <input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="+ 세부 항목"
-          className="h-6 w-28 rounded-full bg-transparent px-2.5 text-xs placeholder:text-zinc-400 focus:bg-white focus:ring-1 focus:ring-zinc-300 focus:outline-none dark:focus:bg-zinc-900 dark:focus:ring-zinc-700"
-        />
-      </form>
-    </div>
   );
 }
 
@@ -326,7 +291,7 @@ function TimeRange() {
   const { startHour, endHour } = useStore((s) => s.settings);
   const sel = cn(fieldCls, 'h-8 w-24 px-2');
   return (
-    <Card title="타임바 시간 범위">
+    <Card title="하루 기록 막대 범위">
       <div className="flex items-center gap-2 text-sm">
         <select value={startHour} onChange={(e) => updateSettings({ startHour: Number(e.target.value) })} className={sel} aria-label="시작 시각">
           {Array.from({ length: 13 }, (_, h) => (

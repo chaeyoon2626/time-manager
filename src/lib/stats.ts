@@ -1,6 +1,6 @@
 import { addDays, weekdayIdx } from './date';
-import { blockId, logId } from './ids';
-import type { Habit, Tables } from './types';
+import { logId } from './ids';
+import type { Habit, Project, Session, Tables, Task } from './types';
 
 export const isScheduled = (h: Habit, date: string) => h.weekdays.length === 0 || h.weekdays.includes(weekdayIdx(date));
 
@@ -17,54 +17,40 @@ export function streak(h: Habit, logs: Set<string>, asOf: string) {
   return n;
 }
 
-export type DayBlocks = {
-  plan: Record<string, number>;
-  actual: Record<string, number>;
-  /** 실제 시간을 세부 항목별로: activity_id → 칸 수 (세부 항목 없는 칸은 빠진다) */
-  actualAct: Record<string, number>;
-  planTotal: number;
-  actualTotal: number;
-  matched: number; // 계획한 영역 그대로 실행한 칸 수
-  focus: number; // 낭비가 아닌 실제 칸 수
-};
-
-const emptyDay = (): DayBlocks => ({ plan: {}, actual: {}, actualAct: {}, planTotal: 0, actualTotal: 0, matched: 0, focus: 0 });
-
-export function dayBlocks(blocks: Tables['time_blocks'], areas: Tables['areas'], date: string): DayBlocks {
-  const r = emptyDay();
-  for (let s = 0; s < 48; s++) {
-    const p = blocks[blockId(date, 'plan', s)];
-    const a = blocks[blockId(date, 'actual', s)];
-    const pa = p && !p.deleted ? p.area_id : null;
-    const aa = a && !a.deleted ? a.area_id : null;
-    if (pa) {
-      r.plan[pa] = (r.plan[pa] ?? 0) + 1;
-      r.planTotal++;
-    }
-    if (aa) {
-      r.actual[aa] = (r.actual[aa] ?? 0) + 1;
-      r.actualTotal++;
-      const act = a.activity_id;
-      if (act) r.actualAct[act] = (r.actualAct[act] ?? 0) + 1;
-      if (!areas[aa]?.is_waste) r.focus++;
-    }
-    if (pa && pa === aa) r.matched++;
-  }
-  return r;
-}
-
-export function sumBlocks(days: DayBlocks[]): DayBlocks {
-  const r = emptyDay();
-  for (const d of days) {
-    for (const [k, v] of Object.entries(d.plan)) r.plan[k] = (r.plan[k] ?? 0) + v;
-    for (const [k, v] of Object.entries(d.actual)) r.actual[k] = (r.actual[k] ?? 0) + v;
-    for (const [k, v] of Object.entries(d.actualAct)) r.actualAct[k] = (r.actualAct[k] ?? 0) + v;
-    r.planTotal += d.planTotal;
-    r.actualTotal += d.actualTotal;
-    r.matched += d.matched;
-    r.focus += d.focus;
-  }
-  return r;
-}
-
 export const pct = (a: number, b: number) => (b ? Math.round((a / b) * 100) : 0);
+
+// ---------- 타이머 기록 ----------
+
+/** 기록이 [from, to) 구간과 겹치는 분. 진행 중인 기록은 now까지로 친다 */
+export function overlapMin(s: Session, from: number, to: number, now: number) {
+  const a = Math.max(Date.parse(s.start), from);
+  const b = Math.min(s.end ? Date.parse(s.end) : now, to);
+  return b > a ? (b - a) / 60_000 : 0;
+}
+
+export type SessionSum = { total: number; byArea: Record<string, number>; byProject: Record<string, number> };
+
+export function sumSessions(sessions: Session[], from: number, to: number, now: number): SessionSum {
+  const r: SessionSum = { total: 0, byArea: {}, byProject: {} };
+  for (const s of sessions) {
+    const m = overlapMin(s, from, to, now);
+    if (!m) continue;
+    r.total += m;
+    const area = s.area_id || '';
+    r.byArea[area] = (r.byArea[area] ?? 0) + m;
+    if (s.project_id) r.byProject[s.project_id] = (r.byProject[s.project_id] ?? 0) + m;
+  }
+  return r;
+}
+
+// ---------- 할 일 ----------
+
+/** 할 일 자체 마감 → 없으면 프로젝트 마감 */
+export const effectiveDue = (t: Task, projects: Tables['projects']) => t.due || projects[t.project_id]?.due || '';
+
+/** 그 주(월요일 key)에 적용되는 꾸준히 목표 시간. 그 주 이전에 정한 목표가 없으면 0 */
+export function targetFor(p: Project, weekKey: string) {
+  let h = 0;
+  for (const t of p.targets ?? []) if (t.from <= weekKey) h = t.hours;
+  return h;
+}
