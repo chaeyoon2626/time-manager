@@ -1,8 +1,8 @@
-import { todayKey, weekStart } from './lib/date';
+import { atTime, todayKey, weekStart } from './lib/date';
 import { MAX_AREAS } from './lib/defaults';
 import { logId, reviewId, uid } from './lib/ids';
 import { parseTask } from './lib/parse';
-import type { Area, BucketItem, Habit, Milestone, Project, ProjectKind, Review, ReviewLevel, Session, Task } from './lib/types';
+import type { Area, BucketItem, Habit, Milestone, PlanSlot, Project, ProjectKind, Review, ReviewLevel, Session, Task } from './lib/types';
 import { TABLES } from './lib/types';
 import { patchRow, putRows, useStore, type Settings } from './store';
 
@@ -177,6 +177,56 @@ export function timerForTask(t: Task) {
 }
 export const timerForProject = (p: Project) => startTimer({ project_id: p.id, area_id: p.area_id, title: p.title });
 export const timerForHabit = (h: Habit) => startTimer({ habit_id: h.id, area_id: h.area_id, title: h.title });
+
+// ---------- 시간표 ----------
+
+/** 시간표에 넣을 "일": 할 일 / 습관 / 꾸준히(프로젝트) */
+export type PlanTarget = { task_id: string; habit_id: string; project_id: string; title: string };
+
+export const planSlotId = (date: string, slot: number) => `${date}_${slot}`;
+export const sameTarget = (a: PlanTarget, b: PlanTarget) =>
+  a.task_id === b.task_id && a.habit_id === b.habit_id && a.project_id === b.project_id && (a.task_id || a.habit_id || a.project_id ? true : a.title === b.title);
+
+/** 계획 칸 채우기. target이 null이면 비우기 */
+export function setPlanSlots(date: string, slots: number[], target: PlanTarget | null) {
+  const cur = data().plan_slots;
+  const rows: Omit<PlanSlot, 'updated_at'>[] = [];
+  for (const slot of slots) {
+    if (slot < 0 || slot > 47) continue;
+    const id = planSlotId(date, slot);
+    const c = cur[id];
+    const alive = c && !c.deleted;
+    if (target === null) {
+      if (alive) rows.push({ ...c, deleted: true });
+    } else if (!alive || !sameTarget(c, target)) {
+      rows.push({ id, date, slot, ...target, deleted: false });
+    }
+  }
+  putRows('plan_slots', rows);
+}
+
+/** 범주 찾기: 할 일 → 그 프로젝트의 범주, 습관 → 습관의 범주, 꾸준히 → 그 범주 */
+export function areaOfTarget(t: PlanTarget) {
+  const d = data();
+  if (t.habit_id) return d.habits[t.habit_id]?.area_id ?? '';
+  return d.projects[t.project_id]?.area_id ?? '';
+}
+
+/**
+ * 실제 칸을 직접 채우기(깜빡한 기록) → 타이머 기록(세션)으로 남긴다.
+ * 바로 앞에 같은 일의 기록이 붙어 있으면 그 기록을 늘린다.
+ */
+export function fillActual(date: string, fromSlot: number, toSlot: number, target: PlanTarget) {
+  const start = atTime(date, slotTime(Math.min(fromSlot, toSlot)));
+  const end = atTime(date, slotTime(Math.max(fromSlot, toSlot) + 1));
+  const prev = Object.values(data().sessions).find(
+    (s) => !s.deleted && s.end === start && s.task_id === target.task_id && s.habit_id === target.habit_id && s.project_id === target.project_id,
+  );
+  if (prev) return updateSession(prev.id, { end });
+  addSession({ ...target, area_id: areaOfTarget(target), start, end });
+}
+
+const slotTime = (slot: number) => (slot >= 48 ? '24:00' : `${String(Math.floor(slot / 2)).padStart(2, '0')}:${slot % 2 ? '30' : '00'}`);
 
 // ---------- 버킷리스트 ----------
 

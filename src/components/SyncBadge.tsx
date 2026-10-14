@@ -17,12 +17,12 @@ export function SyncBadge({ onClick }: { onClick: () => void }) {
   return (
     <button
       onClick={onClick}
-      className="flex items-center gap-2 rounded-full px-2.5 py-1 text-xs font-medium text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+      className="flex items-center gap-2 rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
     >
-      <span className={cn('size-2 rounded-full', dot)} />
+      <span className={cn('size-2 shrink-0 rounded-full', dot)} />
       {label}
       {status !== 'local' && pending > 0 && status !== 'syncing' && (
-        <span className="tabular-nums text-zinc-400">· 대기 {pending}</span>
+        <span className="hidden text-zinc-400 tabular-nums sm:inline">· 대기 {pending}</span>
       )}
     </button>
   );

@@ -55,7 +55,7 @@ export default function App() {
     <div className="min-h-dvh pb-[calc(150px+env(safe-area-inset-bottom))] md:pb-28">
       <header className="sticky top-0 z-30 border-b border-zinc-200/70 bg-zinc-50/85 pt-[env(safe-area-inset-top)] backdrop-blur-md dark:border-zinc-800/80 dark:bg-zinc-950/85">
         <div className="mx-auto flex h-14 max-w-6xl items-center gap-6 px-4">
-          <a href="#today" className="flex items-center gap-2 font-bold tracking-tight">
+          <a href="#today" className="flex shrink-0 items-center gap-2 font-bold tracking-tight whitespace-nowrap">
             <img src="/favicon.svg" alt="" className="size-6" />
             시간관리
           </a>
@@ -79,10 +79,11 @@ export default function App() {
             <SyncBadge onClick={() => go('settings')} />
             <button
               onClick={() => setBucketOpen(true)}
+              aria-label="버킷리스트"
               className="flex h-8 items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 text-[13px] font-medium text-zinc-700 transition hover:bg-zinc-50 active:scale-[0.97] dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
             >
               <Sparkles className="size-4 text-amber-500" />
-              버킷리스트
+              <span className="hidden sm:inline">버킷리스트</span>
             </button>
           </div>
         </div>

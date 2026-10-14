@@ -70,6 +70,16 @@ export type Session = Base & {
   end: string; // ISO, '' = 진행 중
 };
 
+/** 시간표의 계획 칸 하나(30분). id = {date}_{slot} — 한 칸엔 한 가지 일만 */
+export type PlanSlot = Base & {
+  date: string;
+  slot: number; // 0 = 00:00, 1 = 00:30 …
+  task_id: string;
+  habit_id: string;
+  project_id: string; // 할 일의 프로젝트, 또는 꾸준히 자체
+  title: string;
+};
+
 export type ReviewLevel = 'day' | 'week';
 export type Review = Base & {
   level: ReviewLevel;
@@ -100,6 +110,7 @@ export type Tables = {
   projects: Record<string, Project>;
   tasks: Record<string, Task>;
   sessions: Record<string, Session>;
+  plan_slots: Record<string, PlanSlot>;
   reviews: Record<string, Review>;
   bucket_items: Record<string, BucketItem>;
   time_blocks: Record<string, TimeBlock>;
@@ -115,6 +126,7 @@ export const TABLES: TableName[] = [
   'projects',
   'tasks',
   'sessions',
+  'plan_slots',
   'reviews',
   'bucket_items',
   'time_blocks',

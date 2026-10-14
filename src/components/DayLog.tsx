@@ -5,7 +5,6 @@ import { useActiveProjects, useAreaMap, useAreas, useNow, useProjectMap, useSess
 import { atTime, dayBounds, fmtDur, hhmm } from '../lib/date';
 import { overlapMin, sumSessions } from '../lib/stats';
 import type { Session } from '../lib/types';
-import { useStore } from '../store';
 import { Button, Card, cn, fieldCls } from './ui';
 
 /** 그날 잰 시간: 하루 막대 + 기록 목록(고치기·지우기) + 직접 추가 */
@@ -15,7 +14,6 @@ export function DayLog({ date }: { date: string }) {
   const areaList = useAreas();
   const projects = useProjectMap();
   const now = useNow();
-  const { startHour, endHour } = useStore((s) => s.settings);
   const [from, to] = dayBounds(date);
   const [adding, setAdding] = useState(false);
 
@@ -25,10 +23,6 @@ export function DayLog({ date }: { date: string }) {
   );
   const sum = sumSessions(list, from, to, now);
 
-  // 막대: startHour~endHour 구간을 100%로
-  const barFrom = from + startHour * 3_600_000;
-  const barTo = from + endHour * 3_600_000;
-  const span = barTo - barFrom;
   const colorOf = (s: Session) => areas[s.area_id]?.color ?? '#a1a1aa';
   const nameOf = (s: Session) => {
     const p = projects[s.project_id];
@@ -45,29 +39,8 @@ export function DayLog({ date }: { date: string }) {
         </span>
       }
     >
-      <div className="relative h-7 overflow-hidden rounded-lg bg-zinc-100 dark:bg-zinc-800">
-        {list.map((s) => {
-          const a = Math.max(Date.parse(s.start), barFrom);
-          const b = Math.min(s.end ? Date.parse(s.end) : now, barTo);
-          if (b <= a) return null;
-          return (
-            <div
-              key={s.id}
-              title={`${nameOf(s)} ${hhmm(new Date(s.start))}–${s.end ? hhmm(new Date(s.end)) : '지금'}`}
-              className={cn('absolute inset-y-0', !s.end && 'animate-pulse')}
-              style={{ left: `${((a - barFrom) / span) * 100}%`, width: `${Math.max(((b - a) / span) * 100, 0.6)}%`, background: colorOf(s) }}
-            />
-          );
-        })}
-      </div>
-      <div className="mt-1 flex justify-between text-[10px] text-zinc-400 tabular-nums">
-        {Array.from({ length: 5 }, (_, i) => Math.round(startHour + ((endHour - startHour) * i) / 4)).map((h) => (
-          <span key={h}>{h}시</span>
-        ))}
-      </div>
-
       {Object.keys(sum.byArea).length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs">
+        <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
           {areaList
             .filter((a) => sum.byArea[a.id])
             .map((a) => (

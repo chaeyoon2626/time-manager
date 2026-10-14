@@ -28,7 +28,7 @@ export type State = Persisted & {
 const EPOCH = new Date(0).toISOString();
 
 export const emptyTables = (): Tables => ({
-  areas: {}, habits: {}, habit_logs: {}, projects: {}, tasks: {}, sessions: {}, reviews: {}, bucket_items: {}, time_blocks: {},
+  areas: {}, habits: {}, habit_logs: {}, projects: {}, tasks: {}, sessions: {}, plan_slots: {}, reviews: {}, bucket_items: {}, time_blocks: {},
 });
 
 /**

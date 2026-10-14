@@ -136,6 +136,22 @@ create table if not exists public.sessions (
   primary key (user_id, id)
 );
 
+-- 시간표 계획 칸 (30분 단위, id = {date}_{slot})
+create table if not exists public.plan_slots (
+  user_id    uuid not null default auth.uid() references auth.users on delete cascade,
+  id         text not null,
+  date       text not null,
+  slot       smallint not null check (slot between 0 and 47),
+  task_id    text not null default '',
+  habit_id   text not null default '',
+  project_id text not null default '',
+  title      text not null default '',
+  updated_at timestamptz not null,
+  deleted    boolean not null default false,
+  synced_at  timestamptz not null default clock_timestamp(),
+  primary key (user_id, id)
+);
+
 -- 예전 버전의 칠하는 타임바 (지금은 읽기만, 기록은 sessions로 옮겨짐)
 create table if not exists public.time_blocks (
   user_id    uuid not null default auth.uid() references auth.users on delete cascade,
@@ -186,7 +202,7 @@ do $$
 declare t text;
 begin
   foreach t in array array['areas', 'habits', 'habit_logs', 'projects', 'tasks', 'sessions',
-                           'time_blocks', 'reviews', 'bucket_items'] loop
+                           'plan_slots', 'time_blocks', 'reviews', 'bucket_items'] loop
     execute format('alter table public.%I enable row level security', t);
     execute format('drop policy if exists "own rows" on public.%I', t);
     execute format(

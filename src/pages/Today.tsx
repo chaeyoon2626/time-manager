@@ -2,6 +2,7 @@ import { Fragment, useMemo } from 'react';
 import { saveReview } from '../actions';
 import { DateNav } from '../components/DateNav';
 import { DayLog } from '../components/DayLog';
+import { Timetable } from '../components/Timetable';
 import { HabitRow, ListHeader, QuickAdd, SectionTitle, SteadyRow, TaskRow, useTrackedByTask } from '../components/TaskList';
 import { Card, Stat, cn, textareaCls } from '../components/ui';
 import { useActiveProjects, useAreaMap, useHabits, useLogSet, useNow, useProjectMap, useSessions, useToday } from '../hooks';
@@ -105,6 +106,7 @@ export function TodayPage({ date, setDate }: { date: string; setDate: (d: string
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
+        <div className="min-w-0 space-y-4">
         <section className="rounded-2xl border border-zinc-200/80 bg-white p-3 sm:p-4 dark:border-zinc-800 dark:bg-zinc-900">
           <QuickAdd defaultDate={date} />
           <div className="mt-3">
@@ -168,6 +170,8 @@ export function TodayPage({ date, setDate }: { date: string; setDate: (d: string
             )}
           </div>
         </section>
+          <Timetable date={date} tasks={todayList} habits={todaysHabits} steady={steady} />
+        </div>
 
         <div className="space-y-4 lg:sticky lg:top-[72px]">
           <DayLog date={date} />
