@@ -1,11 +1,23 @@
 import { useRef, useState } from 'react';
-import { Archive, ArchiveRestore, Download, Upload } from 'lucide-react';
-import { addHabit, exportData, importData, updateArea, updateHabit, updateSettings } from '../actions';
+import { Archive, ArchiveRestore, Download, Trash2, Upload, X } from 'lucide-react';
+import {
+  addActivity,
+  addArea,
+  addHabit,
+  archiveActivity,
+  deleteArea,
+  exportData,
+  importData,
+  updateArea,
+  updateHabit,
+  updateSettings,
+} from '../actions';
 import { Button, Card, Switch, cn, fieldCls, inputCls } from '../components/ui';
-import { useAreas, useHabits } from '../hooks';
+import { useActivitiesByArea, useAreas, useHabits } from '../hooks';
 import { DAY_LABELS } from '../lib/date';
+import { AREA_PALETTE, MAX_AREAS } from '../lib/defaults';
 import { supabase } from '../lib/supabase';
-import type { Habit } from '../lib/types';
+import type { Activity, Habit } from '../lib/types';
 import { useStore } from '../store';
 import { syncNow } from '../sync';
 
@@ -114,38 +126,104 @@ function AuthForm() {
 
 function Areas() {
   const areas = useAreas();
+  const acts = useActivitiesByArea();
+  const used = new Set(areas.map((a) => a.color));
+  const nextColor = AREA_PALETTE.find((c) => !used.has(c)) ?? AREA_PALETTE[0];
+  const [name, setName] = useState('');
+  const [color, setColor] = useState<string | null>(null);
+  const full = areas.length >= MAX_AREAS;
+
   return (
-    <Card title="영역">
+    <Card title={`범주 ${areas.length}/${MAX_AREAS}`}>
       <p className="mb-3 text-xs text-zinc-400">
-        <b>필수</b>를 끄면 그 영역은 주간 밸런스에서 “기록 없음” 경고가 뜨지 않아요. 습관·시간 기록에는 그대로 쓸 수 있어요.
+        시간·습관을 나누는 큰 칸이에요. 범주 안의 <b>세부 항목</b>(예: 공부 → 독서, 영어)은 타임바에서 시간이 따로 합산돼요.{' '}
+        <b>필수</b>를 켜면 그 주에 기록이 없을 때 “기록 없음”으로 알려줘요.
       </p>
       <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
         {areas.map((a) => (
-          <li key={a.id} className="flex items-center gap-3 py-2">
-            <label className="relative size-7 shrink-0 cursor-pointer overflow-hidden rounded-full ring-1 ring-black/5" style={{ background: a.color }}>
-              <input
-                type="color"
-                value={a.color}
-                onChange={(e) => updateArea(a.id, { color: e.target.value })}
-                className="absolute inset-0 cursor-pointer opacity-0"
-                aria-label={`${a.name} 색`}
-              />
-            </label>
-            <input value={a.name} onChange={(e) => updateArea(a.id, { name: e.target.value })} className={cn(fieldCls, 'h-8 w-full max-w-48 px-3')} aria-label="영역 이름" />
-            <div className="ml-auto flex items-center gap-2 text-xs text-zinc-500">
-              {a.is_waste ? (
-                <span className="text-zinc-400">시간 기록 전용</span>
-              ) : (
-                <>
-                  필수
-                  <Switch label={`${a.name} 필수`} checked={a.required} onChange={(v) => updateArea(a.id, { required: v })} />
-                </>
-              )}
+          <li key={a.id} className="py-3">
+            <div className="flex items-center gap-3">
+              <label className="relative size-7 shrink-0 cursor-pointer overflow-hidden rounded-full ring-1 ring-black/5" style={{ background: a.color }}>
+                <input
+                  type="color"
+                  value={a.color}
+                  onChange={(e) => updateArea(a.id, { color: e.target.value })}
+                  className="absolute inset-0 cursor-pointer opacity-0"
+                  aria-label={`${a.name} 색`}
+                />
+              </label>
+              <input value={a.name} onChange={(e) => updateArea(a.id, { name: e.target.value })} className={cn(fieldCls, 'h-8 w-full max-w-48 px-3')} aria-label="범주 이름" />
+              <div className="ml-auto flex items-center gap-2 text-xs text-zinc-500">
+                필수
+                <Switch label={`${a.name} 필수`} checked={a.required} onChange={(v) => updateArea(a.id, { required: v })} />
+                <Button
+                  aria-label={`${a.name} 삭제`}
+                  title="삭제 (이미 기록한 시간은 남아요)"
+                  className="w-8 px-0 text-zinc-400 hover:text-rose-500"
+                  onClick={() => confirm(`'${a.name}' 범주를 지울까요? 이미 기록한 시간은 그대로 남아요.`) && deleteArea(a.id)}
+                >
+                  <Trash2 className="size-4" />
+                </Button>
+              </div>
             </div>
+            <ActivityChips areaId={a.id} color={a.color} list={acts[a.id] ?? []} />
           </li>
         ))}
       </ul>
+      {full ? (
+        <p className="mt-3 border-t border-zinc-100 pt-3 text-xs text-zinc-400 dark:border-zinc-800">범주는 최대 {MAX_AREAS}개까지예요.</p>
+      ) : (
+        <form
+          className="mt-3 flex items-center gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!name.trim()) return;
+            addArea(name, color ?? nextColor);
+            setName('');
+            setColor(null);
+          }}
+        >
+          <label className="relative size-7 shrink-0 cursor-pointer overflow-hidden rounded-full ring-1 ring-black/5" style={{ background: color ?? nextColor }}>
+            <input type="color" value={color ?? nextColor} onChange={(e) => setColor(e.target.value)} className="absolute inset-0 cursor-pointer opacity-0" aria-label="새 범주 색" />
+          </label>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="새 범주 (예: 사람, 휴식, 낭비)" className={cn(fieldCls, 'h-9 min-w-0 flex-1 px-3')} />
+          <Button type="submit" variant="primary" className="h-9 shrink-0">
+            추가
+          </Button>
+        </form>
+      )}
     </Card>
+  );
+}
+
+function ActivityChips({ areaId, color, list }: { areaId: string; color: string; list: Activity[] }) {
+  const [text, setText] = useState('');
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-1.5 pl-10">
+      {list.map((act) => (
+        <span key={act.id} className="flex h-6 items-center gap-1 rounded-full pr-1 pl-2.5 text-xs" style={{ background: `${color}1a` }}>
+          {act.name}
+          <button aria-label={`${act.name} 빼기`} onClick={() => archiveActivity(act.id)} className="rounded-full p-0.5 text-zinc-400 hover:text-rose-500">
+            <X className="size-3" />
+          </button>
+        </span>
+      ))}
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!text.trim()) return;
+          addActivity(areaId, text);
+          setText('');
+        }}
+      >
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="+ 세부 항목"
+          className="h-6 w-28 rounded-full bg-transparent px-2.5 text-xs placeholder:text-zinc-400 focus:bg-white focus:ring-1 focus:ring-zinc-300 focus:outline-none dark:focus:bg-zinc-900 dark:focus:ring-zinc-700"
+        />
+      </form>
+    </div>
   );
 }
 
@@ -183,7 +261,7 @@ function Habits() {
             setTitle('');
           }}
         >
-          <select value={area} onChange={(e) => setArea(e.target.value)} className={cn(fieldCls, 'h-9 w-24 shrink-0 px-2')} aria-label="영역">
+          <select value={area} onChange={(e) => setArea(e.target.value)} className={cn(fieldCls, 'h-9 w-24 shrink-0 px-2')} aria-label="범주">
             {areas.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.name}
@@ -210,7 +288,7 @@ function HabitEditor({ habit: h, areas }: { habit: Habit; areas: ReturnType<type
   return (
     <li className="space-y-2 py-3">
       <div className="flex gap-2">
-        <select value={h.area_id} onChange={(e) => updateHabit(h.id, { area_id: e.target.value })} className={cn(fieldCls, 'h-8 w-24 shrink-0 px-2')} aria-label="영역">
+        <select value={h.area_id} onChange={(e) => updateHabit(h.id, { area_id: e.target.value })} className={cn(fieldCls, 'h-8 w-24 shrink-0 px-2')} aria-label="범주">
           {areas.map((a) => (
             <option key={a.id} value={a.id}>
               {a.name}

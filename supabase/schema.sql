@@ -1,4 +1,4 @@
--- 포커스 플래너 스키마
+-- 시간관리 앱 스키마
 -- Supabase 대시보드 > SQL Editor 에 통째로 붙여넣고 Run 하세요.
 -- 여러 번 실행해도 안전하다 (이미 있는 테이블·규칙은 건너뛰거나 다시 만든다, 데이터는 지우지 않음)
 --
@@ -113,11 +113,28 @@ create table if not exists public.bucket_items (
   primary key (user_id, id)
 );
 
+-- 범주 안의 세부 항목 (예: 공부 → 독서, 영어)
+create table if not exists public.activities (
+  user_id    uuid not null default auth.uid() references auth.users on delete cascade,
+  id         text not null,
+  area_id    text not null,
+  name       text not null,
+  sort       double precision not null default 0,
+  archived   boolean not null default false,
+  updated_at timestamptz not null,
+  deleted    boolean not null default false,
+  synced_at  timestamptz not null default clock_timestamp(),
+  primary key (user_id, id)
+);
+
+-- 타임바 칸에 세부 항목 연결 ('' = 없음)
+alter table public.time_blocks add column if not exists activity_id text not null default '';
+
 -- 공통: 본인 행만 읽고 쓰기(RLS) + synced_at 트리거 + 인덱스
 do $$
 declare t text;
 begin
-  foreach t in array array['areas', 'habits', 'habit_logs', 'tasks', 'time_blocks', 'reviews', 'bucket_items'] loop
+  foreach t in array array['areas', 'activities', 'habits', 'habit_logs', 'tasks', 'time_blocks', 'reviews', 'bucket_items'] loop
     execute format('alter table public.%I enable row level security', t);
     execute format('drop policy if exists "own rows" on public.%I', t);
     execute format(

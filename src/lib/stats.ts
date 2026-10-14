@@ -20,13 +20,15 @@ export function streak(h: Habit, logs: Set<string>, asOf: string) {
 export type DayBlocks = {
   plan: Record<string, number>;
   actual: Record<string, number>;
+  /** 실제 시간을 세부 항목별로: activity_id → 칸 수 (세부 항목 없는 칸은 빠진다) */
+  actualAct: Record<string, number>;
   planTotal: number;
   actualTotal: number;
   matched: number; // 계획한 영역 그대로 실행한 칸 수
   focus: number; // 낭비가 아닌 실제 칸 수
 };
 
-const emptyDay = (): DayBlocks => ({ plan: {}, actual: {}, planTotal: 0, actualTotal: 0, matched: 0, focus: 0 });
+const emptyDay = (): DayBlocks => ({ plan: {}, actual: {}, actualAct: {}, planTotal: 0, actualTotal: 0, matched: 0, focus: 0 });
 
 export function dayBlocks(blocks: Tables['time_blocks'], areas: Tables['areas'], date: string): DayBlocks {
   const r = emptyDay();
@@ -42,6 +44,8 @@ export function dayBlocks(blocks: Tables['time_blocks'], areas: Tables['areas'],
     if (aa) {
       r.actual[aa] = (r.actual[aa] ?? 0) + 1;
       r.actualTotal++;
+      const act = a.activity_id;
+      if (act) r.actualAct[act] = (r.actualAct[act] ?? 0) + 1;
       if (!areas[aa]?.is_waste) r.focus++;
     }
     if (pa && pa === aa) r.matched++;
@@ -54,6 +58,7 @@ export function sumBlocks(days: DayBlocks[]): DayBlocks {
   for (const d of days) {
     for (const [k, v] of Object.entries(d.plan)) r.plan[k] = (r.plan[k] ?? 0) + v;
     for (const [k, v] of Object.entries(d.actual)) r.actual[k] = (r.actual[k] ?? 0) + v;
+    for (const [k, v] of Object.entries(d.actualAct)) r.actualAct[k] = (r.actualAct[k] ?? 0) + v;
     r.planTotal += d.planTotal;
     r.actualTotal += d.actualTotal;
     r.matched += d.matched;

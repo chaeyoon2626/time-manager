@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { todayKey } from './lib/date';
-import type { Area, Habit, RowOf, TableName } from './lib/types';
+import type { Activity, Area, Habit, RowOf, TableName } from './lib/types';
 import { useStore } from './store';
 
 export function useAlive<T extends TableName>(table: T): RowOf<T>[] {
@@ -11,6 +11,20 @@ export function useAlive<T extends TableName>(table: T): RowOf<T>[] {
 export function useAreas(): Area[] {
   const list = useAlive('areas');
   return useMemo(() => [...list].sort((a, b) => a.sort - b.sort), [list]);
+}
+
+/** 보관하지 않은 세부 항목, 영역별로 묶어서 */
+export function useActivitiesByArea() {
+  const list = useAlive('activities');
+  return useMemo(() => {
+    const by: Record<string, Activity[]> = {};
+    for (const a of [...list].filter((x) => !x.archived).sort((x, y) => x.sort - y.sort)) (by[a.area_id] ??= []).push(a);
+    return by;
+  }, [list]);
+}
+
+export function useActivityMap() {
+  return useStore((s) => s.data.activities);
 }
 
 export function useAreaMap() {

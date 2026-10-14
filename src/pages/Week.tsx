@@ -2,7 +2,7 @@ import { Check, Flame } from 'lucide-react';
 import { saveReview, toggleHabit } from '../actions';
 import { DateNav } from '../components/DateNav';
 import { Card, Stat, cn, textareaCls } from '../components/ui';
-import { useAreaMap, useAreas, useHabits, useLogSet, useToday } from '../hooks';
+import { useActivityMap, useAreaMap, useAreas, useHabits, useLogSet, useToday } from '../hooks';
 import { DAY_LABELS, fmtShort, hours, weekDays, weekStart } from '../lib/date';
 import { logId, reviewId } from '../lib/ids';
 import { dayBlocks, isScheduled, pct, streak, sumBlocks } from '../lib/stats';
@@ -120,7 +120,7 @@ export function WeekPage({ date, setDate }: { date: string; setDate: (d: string)
       </Card>
 
       <div className="grid gap-4 md:grid-cols-2">
-        <Card title="영역 밸런스">
+        <Card title="범주 밸런스">
           <div className="space-y-3">
             {areas.map((a) => {
               const p = week.plan[a.id] ?? 0;
@@ -141,6 +141,7 @@ export function WeekPage({ date, setDate }: { date: string; setDate: (d: string)
                     <div className="absolute inset-y-0 left-0 rounded-full opacity-25" style={{ width: `${(p / max) * 100}%`, background: a.color }} />
                     <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${(r / max) * 100}%`, background: a.color }} />
                   </div>
+                  <ActivityBreakdown areaId={a.id} actualAct={week.actualAct} />
                 </div>
               );
             })}
@@ -153,6 +154,24 @@ export function WeekPage({ date, setDate }: { date: string; setDate: (d: string)
       </div>
 
       <WeeklyReview weekKey={weekStart(date)} days={days} />
+    </div>
+  );
+}
+
+/** 영역 안 세부 항목별 시간 (많은 순) */
+function ActivityBreakdown({ areaId, actualAct }: { areaId: string; actualAct: Record<string, number> }) {
+  const actMap = useActivityMap();
+  const subs = Object.entries(actualAct)
+    .filter(([id]) => actMap[id]?.area_id === areaId)
+    .sort((x, y) => y[1] - x[1]);
+  if (!subs.length) return null;
+  return (
+    <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-zinc-500">
+      {subs.map(([id, n]) => (
+        <span key={id}>
+          {actMap[id].name} <b className="font-semibold text-zinc-700 tabular-nums dark:text-zinc-300">{hours(n)}</b>
+        </span>
+      ))}
     </div>
   );
 }

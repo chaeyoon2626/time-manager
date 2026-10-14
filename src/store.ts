@@ -27,13 +27,37 @@ export type State = Persisted & {
 const EPOCH = new Date(0).toISOString();
 
 export const emptyTables = (): Tables => ({
-  areas: {}, habits: {}, habit_logs: {}, tasks: {}, time_blocks: {}, reviews: {}, bucket_items: {},
+  areas: {}, activities: {}, habits: {}, habit_logs: {}, tasks: {}, time_blocks: {}, reviews: {}, bucket_items: {},
 });
 
 // 기본 영역은 EPOCH 시각으로 넣어서, 다른 기기에서 고친 값이 항상 이기게 한다
 function withDefaults(data: Tables): Tables {
   const areas = { ...data.areas };
   for (const a of DEFAULT_AREAS) if (!areas[a.id]) areas[a.id] = { ...a, updated_at: EPOCH, deleted: false };
+  return { ...data, areas };
+}
+
+/**
+ * v2: 기본 범주가 커리어·취미·공부·운동으로 바뀌었다.
+ * 한 번도 손대지 않은(EPOCH) 기본값만 고친다 — 사용자가 고친 이름·색은 그대로 둔다.
+ */
+function migrateAreasV2(data: Tables): Tables {
+  const areas = { ...data.areas };
+  const untouched = (id: string) => areas[id] && areas[id].updated_at === EPOCH;
+  const rename: Record<string, [string, string, number]> = {
+    career: ['커리어', '커리어', 0],
+    hobby: ['취미', '취미', 1],
+    intellect: ['지적', '공부', 2],
+    body: ['신체', '운동', 3],
+  };
+  for (const [id, [from, to, sort]] of Object.entries(rename)) {
+    if (untouched(id) && areas[id].name === from) areas[id] = { ...areas[id], name: to, sort };
+  }
+  // 예전 기본값 사회·낭비: 손대지 않았고 아무 기록에도 안 쓰였으면 없앤다
+  const used = new Set<string>();
+  for (const b of Object.values(data.time_blocks ?? {})) if (!b.deleted) used.add(b.area_id);
+  for (const h of Object.values(data.habits ?? {})) if (!h.deleted) used.add(h.area_id);
+  for (const id of ['social', 'waste']) if (untouched(id) && !used.has(id)) delete areas[id];
   return { ...data, areas };
 }
 
@@ -72,7 +96,12 @@ export const useStore = create<State>()(
     }),
     {
       name: 'focus-planner',
-      version: 1,
+      version: 2,
+      migrate: (persisted, version) => {
+        const p = persisted as Persisted;
+        if (version < 2 && p?.data) p.data = migrateAreasV2(p.data);
+        return p;
+      },
       storage,
       partialize: (s) => ({ data: s.data, dirty: s.dirty, settings: s.settings, cursors: s.cursors }),
       merge: (persisted, current) => {

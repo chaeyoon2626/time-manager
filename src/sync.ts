@@ -64,7 +64,10 @@ async function push(userId: string) {
     const rows = byTable[t];
     if (!rows) continue;
     for (let i = 0; i < rows.length; i += CHUNK) {
-      const { error } = await supabase!.from(t).upsert(rows.slice(i, i + CHUNK), { onConflict: 'user_id,id' });
+      // defaultToNull: false → 예전 행에 없는 칸(예: activity_id)은 null 대신 DB 기본값으로
+      const { error } = await supabase!
+        .from(t)
+        .upsert(rows.slice(i, i + CHUNK), { onConflict: 'user_id,id', defaultToNull: false });
       if (error) throw error;
     }
   }

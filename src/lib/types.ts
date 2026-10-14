@@ -13,7 +13,15 @@ export type HabitLog = Base & { habit_id: string; date: string };
 export type Quadrant = 'q1' | 'q2' | 'q3' | 'q4';
 export type Task = Base & { date: string; quadrant: Quadrant; title: string; done: boolean; sort: number };
 export type BlockKind = 'plan' | 'actual';
-export type TimeBlock = Base & { date: string; kind: BlockKind; slot: number; area_id: string };
+/** 영역 안의 세부 항목 (예: 지적 → 독서, 영어 공부) */
+export type Activity = Base & { area_id: string; name: string; sort: number; archived: boolean };
+export type TimeBlock = Base & {
+  date: string;
+  kind: BlockKind;
+  slot: number;
+  area_id: string;
+  activity_id: string; // '' = 세부 항목 없음 (예전 기록에는 이 값이 없을 수도 있다)
+};
 export type ReviewLevel = 'day' | 'week';
 export type Review = Base & {
   level: ReviewLevel;
@@ -36,6 +44,7 @@ export type BucketItem = Base & {
 
 export type Tables = {
   areas: Record<string, Area>;
+  activities: Record<string, Activity>;
   habits: Record<string, Habit>;
   habit_logs: Record<string, HabitLog>;
   tasks: Record<string, Task>;
@@ -47,4 +56,4 @@ export type TableName = keyof Tables;
 export type RowOf<T extends TableName> = Tables[T][string];
 export type NewRow<T extends TableName> = Omit<RowOf<T>, 'updated_at' | 'deleted'> & { deleted?: boolean };
 
-export const TABLES: TableName[] = ['areas', 'habits', 'habit_logs', 'tasks', 'time_blocks', 'reviews', 'bucket_items'];
+export const TABLES: TableName[] = ['areas', 'activities', 'habits', 'habit_logs', 'tasks', 'time_blocks', 'reviews', 'bucket_items'];

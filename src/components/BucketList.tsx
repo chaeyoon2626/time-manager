@@ -165,8 +165,8 @@ export function BucketList({ onClose }: { onClose: () => void }) {
                 </option>
               ))}
             </select>
-            <select value={area} onChange={(e) => setArea(e.target.value)} className={cn(fieldCls, 'h-8 flex-1 px-2 text-xs')} aria-label="영역">
-              <option value="">영역 없음</option>
+            <select value={area} onChange={(e) => setArea(e.target.value)} className={cn(fieldCls, 'h-8 flex-1 px-2 text-xs')} aria-label="범주">
+              <option value="">범주 없음</option>
               {areas.map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.name}

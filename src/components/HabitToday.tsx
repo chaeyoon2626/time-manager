@@ -136,7 +136,7 @@ function QuickAdd() {
         value={area}
         onChange={(e) => setArea(e.target.value)}
         className={cn(fieldCls, 'h-9 w-24 shrink-0 px-2')}
-        aria-label="영역"
+        aria-label="범주"
       >
         {areas.map((a) => (
           <option key={a.id} value={a.id}>
