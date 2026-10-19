@@ -137,6 +137,30 @@ create table if not exists public.sessions (
   primary key (user_id, id)
 );
 
+-- 세부 영역: 프로젝트·꾸준히 안의 갈래 (중국어 → 단어 / 듣기 / 독해)
+create table if not exists public.subareas (
+  user_id     uuid not null default auth.uid() references auth.users on delete cascade,
+  id          text not null,
+  project_id  text not null,
+  name        text not null,
+  cadence     text not null default 'none',     -- 'days' = 정한 요일마다, 'none' = 가끔
+  weekdays    int[] not null default '{}',      -- 0=월 … 6=일, 비어 있으면 매일
+  mode        text not null default 'choose',   -- 'fixed' = 매번 같은 것, 'choose' = 그날 정하기
+  fixed_title text not null default '',
+  estimate    int not null default 0,
+  time        text not null default '',
+  sort        double precision not null default 0,
+  archived    boolean not null default false,
+  created_on  text not null default '',
+  skips       jsonb not null default '[]',      -- "오늘은 쉬기" 한 날짜들
+  updated_at  timestamptz not null,
+  deleted     boolean not null default false,
+  synced_at   timestamptz not null default clock_timestamp(),
+  primary key (user_id, id)
+);
+alter table public.tasks add column if not exists subarea_id text    not null default '';
+alter table public.tasks add column if not exists routine    boolean not null default false; -- 세부 영역의 그날 할 일
+
 -- 시간표 계획 칸 (30분 단위, id = {date}_{slot})
 create table if not exists public.plan_slots (
   user_id    uuid not null default auth.uid() references auth.users on delete cascade,
@@ -211,7 +235,7 @@ alter table public.bucket_items add column if not exists note text not null defa
 do $$
 declare t text;
 begin
-  foreach t in array array['areas', 'habits', 'habit_logs', 'projects', 'tasks', 'sessions',
+  foreach t in array array['areas', 'habits', 'habit_logs', 'projects', 'subareas', 'tasks', 'sessions',
                            'plan_slots', 'time_blocks', 'reviews', 'bucket_items'] loop
     execute format('alter table public.%I enable row level security', t);
     execute format('drop policy if exists "own rows" on public.%I', t);

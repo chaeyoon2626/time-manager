@@ -1,5 +1,6 @@
-import { Fragment, useMemo } from 'react';
-import { saveReview } from '../actions';
+import { Fragment, useEffect, useMemo } from 'react';
+import { ensureRoutineTasks, saveReview } from '../actions';
+import { SubareaGroups } from '../components/SubareaGroups';
 import { DateNav } from '../components/DateNav';
 import { DayLog } from '../components/DayLog';
 import { Timetable } from '../components/Timetable';
@@ -49,8 +50,14 @@ export function TodayPage({ date, setDate }: { date: string; setDate: (d: string
   const now = useNow();
   const tracked = useTrackedByTask();
 
-  const { todayList, laterList, doneList } = useMemo(() => {
-    const all = Object.values(tasksRec).filter((t) => !t.deleted);
+  // 고정 세부 영역의 그날 할 일 만들기 (보고 있는 날이 오늘~일주일 안일 때)
+  const subareas = useStore((s) => s.data.subareas);
+  useEffect(() => ensureRoutineTasks(date), [date, subareas]);
+
+  const { todayList, laterList, doneList, routineList } = useMemo(() => {
+    // 세부 영역의 그날 할 일은 따로 — 그날의 세부 영역 묶음에만 보이고 밀림으로 쌓이지 않는다
+    const routineList = Object.values(tasksRec).filter((t) => !t.deleted && t.routine && t.date === date);
+    const all = Object.values(tasksRec).filter((t) => !t.deleted && !t.routine);
     const isToday = (t: Task) =>
       t.date === date || t.due === date || (date === today && ((!!t.date && t.date < today) || (!!t.due && t.due < today)));
     const late = (t: Task) => (!!t.date && t.date < today) || (!!t.due && t.due < today);
@@ -86,13 +93,15 @@ export function TodayPage({ date, setDate }: { date: string; setDate: (d: string
         );
       });
     const doneList = all.filter((t) => t.done && (t.done_on === date || (!t.done_on && t.date === date)));
-    return { todayList, laterList, doneList };
+    return { todayList, laterList, doneList, routineList };
   }, [tasksRec, projects, areas, date, today]);
 
   const todaysHabits = habits.filter((h) => isScheduled(h, date));
   const habitDone = todaysHabits.filter((h) => logs.has(logId(h.id, date))).length;
-  // 예정 시간 = 오늘 할 일 + 오늘의 반복 할 일 예상 시간 합계
-  const planned = [...todayList, ...doneList].reduce((n, t) => n + t.estimate, 0) + todaysHabits.reduce((n, h) => n + (h.estimate ?? 0), 0);
+  const routineDone = routineList.filter((t) => t.done).length;
+  // 예정 시간 = 오늘 할 일 + 세부 영역 할 일 + 오늘의 반복 할 일 예상 시간 합계
+  const planned =
+    [...todayList, ...doneList, ...routineList].reduce((n, t) => n + t.estimate, 0) + todaysHabits.reduce((n, h) => n + (h.estimate ?? 0), 0);
   const [from, to] = dayBounds(date);
   const actual = sumSessions(sessions, from, to, now).total;
   const ws = weekStart(date);
@@ -106,7 +115,7 @@ export function TodayPage({ date, setDate }: { date: string; setDate: (d: string
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Stat label="예정 시간" value={planned ? fmtDur(planned) : '–'} sub="예상 합계" />
         <Stat label="실제 시간" value={fmtDur(actual)} sub="타이머 기록" />
-        <Stat label="할 일" value={doneList.length} sub={`/ ${todayList.length + doneList.length}개`} />
+        <Stat label="할 일" value={doneList.length + routineDone} sub={`/ ${todayList.length + doneList.length + routineList.length}개`} />
         <Stat label="반복" value={habitDone} sub={`/ ${todaysHabits.length}개`} />
       </div>
 
@@ -128,7 +137,10 @@ export function TodayPage({ date, setDate }: { date: string; setDate: (d: string
               {todaysHabits.map((h) => (
                 <HabitRow key={h.id} habit={h} date={date} logs={logs} streakDays={streak(h, logs, date)} />
               ))}
-              {todayList.length + todaysHabits.length === 0 && (
+            </ul>
+            <SubareaGroups date={date} today={today} routineTasks={routineList} tracked={tracked} />
+            <ul>
+              {todayList.length + todaysHabits.length + routineList.length === 0 && (
                 <li className="px-3 py-3 text-sm text-zinc-400">비어 있어요. 위에 바로 적거나, 아래 ②에서 <b>오늘</b>을 눌러 가져오세요.</li>
               )}
             </ul>
@@ -178,11 +190,11 @@ export function TodayPage({ date, setDate }: { date: string; setDate: (d: string
             )}
           </div>
         </section>
-          <Timetable date={date} tasks={[...todayList, ...doneList]} habits={todaysHabits} />
+          <Timetable date={date} tasks={[...todayList, ...routineList, ...doneList]} habits={todaysHabits} />
         </div>
 
         <div className="space-y-4 lg:sticky lg:top-[72px]">
-          <DayLog date={date} tasks={[...todayList, ...doneList]} habits={todaysHabits} />
+          <DayLog date={date} tasks={[...todayList, ...routineList, ...doneList]} habits={todaysHabits} />
           <DailyReview date={date} />
         </div>
       </div>

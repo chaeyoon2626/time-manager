@@ -28,7 +28,7 @@ export type State = Persisted & {
 const EPOCH = new Date(0).toISOString();
 
 export const emptyTables = (): Tables => ({
-  areas: {}, habits: {}, habit_logs: {}, projects: {}, tasks: {}, sessions: {}, plan_slots: {}, reviews: {}, bucket_items: {}, time_blocks: {},
+  areas: {}, habits: {}, habit_logs: {}, projects: {}, subareas: {}, tasks: {}, sessions: {}, plan_slots: {}, reviews: {}, bucket_items: {}, time_blocks: {},
 });
 
 /**
@@ -191,6 +191,60 @@ function migrateV4(p: Persisted): Persisted {
   return { ...p, data: { ...p.data, tasks, sessions }, dirty };
 }
 
+/** 세부 영역의 그날 할 일 id — 어느 기기에서 만들어도 같은 id라 중복이 생기지 않는다 */
+export const routineTaskId = (subareaId: string, date: string) => `rt_${subareaId}_${date}`;
+
+/**
+ * v6: 프로젝트·꾸준히 안의 반복 할 일 → "세부 영역"(고정)으로.
+ * 체크했던 날은 그날의 완료된 할 일로, 잰 시간은 그 할 일로 이어 붙인다. id는 내용으로 정해서 기기마다 같게.
+ */
+function migrateV6(p: Persisted): Persisted {
+  const now = new Date().toISOString();
+  const data = { ...p.data, subareas: { ...(p.data.subareas ?? {}) } };
+  const habits = { ...data.habits };
+  const tasks = { ...data.tasks };
+  const sessions = { ...data.sessions };
+  const dirty = { ...p.dirty };
+  const mark = (t: string, id: string) => (dirty[`${t}:${id}`] = true);
+  const dayOf = (iso: string) => {
+    const d = new Date(iso);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+
+  for (const h of Object.values(habits)) {
+    if (h.deleted || !h.project_id) continue;
+    const saId = `sa_${h.id}`;
+    data.subareas[saId] = {
+      id: saId, project_id: h.project_id, name: h.title, cadence: 'days', weekdays: h.weekdays, mode: 'fixed',
+      fixed_title: h.title, estimate: h.estimate ?? 0, time: h.time ?? '', sort: h.sort, archived: h.archived,
+      created_on: h.created_on, skips: [], updated_at: now, deleted: false,
+    };
+    mark('subareas', saId);
+    const doneDates = new Set(Object.values(data.habit_logs).filter((l) => !l.deleted && l.habit_id === h.id).map((l) => l.date));
+    const ensureTask = (date: string) => {
+      const id = routineTaskId(saId, date);
+      if (!tasks[id]) {
+        tasks[id] = {
+          id, title: h.title, project_id: h.project_id!, area_id: '', subarea_id: saId, routine: true, date, due: date,
+          time: h.time ?? '', estimate: h.estimate ?? 0, important: false, done: doneDates.has(date),
+          done_on: doneDates.has(date) ? date : '', sort: h.sort, updated_at: now, deleted: false,
+        };
+        mark('tasks', id);
+      }
+      return id;
+    };
+    doneDates.forEach(ensureTask);
+    for (const s of Object.values(sessions)) {
+      if (s.deleted || s.habit_id !== h.id) continue;
+      sessions[s.id] = { ...s, habit_id: '', task_id: ensureTask(dayOf(s.start)), updated_at: now };
+      mark('sessions', s.id);
+    }
+    habits[h.id] = { ...h, deleted: true, updated_at: now };
+    mark('habits', h.id);
+  }
+  return { ...p, data: { ...data, habits, tasks, sessions }, dirty };
+}
+
 // IndexedDB 저장은 0.4초 모아서 한 번에 (입력할 때마다 디스크에 쓰지 않도록)
 let pending: { name: string; value: StorageValue<Persisted> } | null = null;
 let flushTimer: ReturnType<typeof setTimeout> | undefined;
@@ -226,7 +280,7 @@ export const useStore = create<State>()(
     }),
     {
       name: 'focus-planner',
-      version: 5,
+      version: 6,
       migrate: (persisted, version) => {
         let p = persisted as Persisted;
         if (!p?.data) return p;
@@ -234,6 +288,7 @@ export const useStore = create<State>()(
         if (version < 3) p = migrateV3(p);
         if (version < 4) p = migrateV4(p);
         if (version < 5) p = migrateV5(p);
+        if (version < 6) p = migrateV6(p);
         return p;
       },
       storage,

@@ -22,6 +22,7 @@ import { logId } from '../lib/ids';
 import { parseTask } from '../lib/parse';
 import { effectiveDue, overlapMin, targetFor } from '../lib/stats';
 import type { Area, Habit, Project, Task } from '../lib/types';
+import { useStore } from '../store';
 import { cn, fieldCls } from './ui';
 
 // ---------- 표 모양 ----------
@@ -330,6 +331,7 @@ export function TaskRow({
   showProject = true,
   pinnable = false,
   hideDate = false,
+  chipLabel,
 }: {
   task: Task;
   today: string;
@@ -340,6 +342,8 @@ export function TaskRow({
   pinnable?: boolean;
   /** 날짜 머리줄 아래에 있을 때: "10/18 예정" 표시 생략 */
   hideDate?: boolean;
+  /** 분류 칸에 프로젝트 이름 대신 보일 이름 (세부 영역 묶음 안에서는 세부 영역 이름) */
+  chipLabel?: string;
 }) {
   const projects = useProjectMap();
   const areas = useAreaMap();
@@ -347,10 +351,12 @@ export function TaskRow({
   const [open, setOpen] = useState(false);
   const p = projects[t.project_id];
   const area = areas[p ? p.area_id : t.area_id || DAILY_AREA];
-  const due = effectiveDue(t, projects);
-  const late = !t.done && ((t.date && t.date < today) || (due && due < today));
+  // 세부 영역의 그날 할 일은 마감이 늘 그날이라 표시하지 않는다
+  const due = t.routine ? '' : effectiveDue(t, projects);
+  // 세부 영역의 그날 할 일은 그날만 보이고 밀림으로 치지 않는다
+  const late = !t.done && !t.routine && ((t.date && t.date < today) || (due && due < today));
   const isRunning = running?.task_id === t.id;
-  const category = <Chip name={p ? p.title : (area?.name ?? '일상')} color={area?.color} />;
+  const category = <Chip name={chipLabel ?? (p ? p.title : (area?.name ?? '일상'))} color={area?.color} />;
   const scheduledOther = t.date && t.date !== viewDate;
 
   const title = (
@@ -411,6 +417,8 @@ const ESTIMATES = [0, 15, 30, 45, 60, 90, 120, 180, 240];
 function TaskEditor({ task: t, today, tracked, onClose }: { task: Task; today: string; tracked: number; onClose: () => void }) {
   const projectMap = useProjectMap();
   const dailyId = useDailyId();
+  const subareasRec = useStore((s) => s.data.subareas);
+  const subs = Object.values(subareasRec).filter((sa) => !sa.deleted && !sa.archived && sa.project_id === t.project_id && !!t.project_id);
   const lbl = 'mb-1 block text-[11px] font-medium text-zinc-400';
   const small = cn(fieldCls, 'h-8 w-full px-2 text-[13px]');
   const quick = (label: string, active: boolean, onClick: () => void) => (
@@ -433,13 +441,27 @@ function TaskEditor({ task: t, today, tracked, onClose }: { task: Task; today: s
             value={t.project_id ? `p:${t.project_id}` : `a:${!t.area_id || t.area_id === DAILY_AREA ? dailyId : t.area_id}`}
             onChange={(e) => {
               const [k, id] = [e.target.value.slice(0, 1), e.target.value.slice(2)];
-              updateTask(t.id, k === 'p' ? { project_id: id } : { project_id: '', area_id: id });
+              // 프로젝트가 바뀌면 세부 영역은 비운다
+              updateTask(t.id, k === 'p' ? { project_id: id, subarea_id: id === t.project_id ? t.subarea_id : '' } : { project_id: '', area_id: id, subarea_id: '' });
             }}
             className={small}
           >
             <ClassifyOptions extraProject={projectMap[t.project_id]} />
           </select>
         </label>
+        {subs.length > 0 && (
+          <label className="block">
+            <span className={lbl}>세부 영역</span>
+            <select value={t.subarea_id ?? ''} onChange={(e) => updateTask(t.id, { subarea_id: e.target.value })} className={small}>
+              <option value="">없음</option>
+              {subs.map((sa) => (
+                <option key={sa.id} value={sa.id}>
+                  {sa.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <div>
           <span className={lbl}>할 날</span>
           <input type="date" value={t.date} onChange={(e) => updateTask(t.id, { date: e.target.value })} className={small} />
@@ -680,8 +702,14 @@ export function QuickAdd({ defaultDate, projectId, placeholder }: { defaultDate?
         if (!r) return;
         setText('');
         setRepeat(null);
-        setMade(r.kind === 'habit' ? '반복 할 일로 만들었어요 — 정한 요일마다 ①에 떠요. 눌러서 고칠 수 있어요' : null);
-        if (r.kind === 'habit') setTimeout(() => setMade(null), 3500);
+        setMade(
+          r.kind === 'habit'
+            ? '반복 할 일로 만들었어요 — 정한 요일마다 ①에 떠요. 눌러서 고칠 수 있어요'
+            : r.kind === 'subarea'
+              ? '고정 세부 영역으로 만들었어요 — 정한 요일마다 ①에 그날 할 일이 생겨요'
+              : null,
+        );
+        if (r.kind !== 'task') setTimeout(() => setMade(null), 3500);
       }}
     >
       <div className="flex gap-2">

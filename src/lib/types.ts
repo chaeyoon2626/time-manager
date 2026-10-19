@@ -58,7 +58,31 @@ export type Project = Base & {
   milestones?: Milestone[]; // 예전 행에는 없을 수 있다
 };
 
+/**
+ * 세부 영역: 프로젝트·꾸준히 안의 갈래 (예: 중국어 → 단어 / 듣기 / 독해, 취업준비 → 자소서 / 면접).
+ *  - cadence 'days' = 정한 요일마다(weekdays, [] = 매일), 'none' = 가끔(필요할 때만)
+ *  - mode 'fixed'  = 매번 같은 내용(fixed_title) → 그날 할 일이 자동으로 생긴다
+ *         'choose' = 그날 정하기 → 오늘 목록에 "오늘 뭐 할까?" 빈칸 + 예전에 한 것 칩
+ */
+export type Subarea = Base & {
+  project_id: string;
+  name: string;
+  cadence: 'none' | 'days';
+  weekdays: number[];
+  mode: 'fixed' | 'choose';
+  fixed_title: string;
+  estimate: number;
+  time: string;
+  sort: number;
+  archived: boolean;
+  created_on: string;
+  skips: string[]; // "오늘은 쉬기" 한 날짜들
+};
+
 export type Task = Base & {
+  subarea_id?: string; // 세부 영역에 속한 할 일
+  /** 세부 영역에서 그날을 위해 생긴 할 일 — 그날에만 보이고, 지나도 밀림으로 쌓이지 않는다 */
+  routine?: boolean;
   title: string;
   project_id: string; // '' = 프로젝트 없음 → area_id 범주(기본 일상)로 분류
   area_id?: string; // 프로젝트 없는 할 일의 범주, 없으면 'daily'
@@ -128,6 +152,7 @@ export type Tables = {
   habits: Record<string, Habit>;
   habit_logs: Record<string, HabitLog>;
   projects: Record<string, Project>;
+  subareas: Record<string, Subarea>;
   tasks: Record<string, Task>;
   sessions: Record<string, Session>;
   plan_slots: Record<string, PlanSlot>;
@@ -144,6 +169,7 @@ export const TABLES: TableName[] = [
   'habits',
   'habit_logs',
   'projects',
+  'subareas',
   'tasks',
   'sessions',
   'plan_slots',

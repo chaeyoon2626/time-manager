@@ -6,7 +6,7 @@ import { Card, Stat, cn, textareaCls } from '../components/ui';
 import { useActiveProjects, useAreaMap, useAreas, useHabits, useLogSet, useNow, useSessions, useToday } from '../hooks';
 import { addDays, DAY_LABELS, dayBounds, fmtDur, fmtShort, fromKey, weekDays, weekStart } from '../lib/date';
 import { logId, reviewId } from '../lib/ids';
-import { isScheduled, pct, streak, sumSessions, targetFor } from '../lib/stats';
+import { isScheduled, overlapMin, pct, streak, sumSessions, targetFor } from '../lib/stats';
 import type { Habit, Review } from '../lib/types';
 import { useStore } from '../store';
 
@@ -34,6 +34,21 @@ export function WeekPage({ date, setDate }: { date: string; setDate: (d: string)
   }
 
   const week = sumSessions(sessions, fromKey(ws).getTime(), fromKey(addDays(ws, 7)).getTime(), now);
+  // 세부 영역별 시간 (기록 → 할 일 → 세부 영역): 프로젝트 id → [이름, 분][] 많은 순
+  const subareasRec = useStore((s) => s.data.subareas);
+  const subMinutes = useMemo(() => {
+    const from = fromKey(ws).getTime();
+    const to = fromKey(addDays(ws, 7)).getTime();
+    const acc: Record<string, Record<string, number>> = {};
+    for (const s of sessions) {
+      const sa = subareasRec[tasksRec[s.task_id]?.subarea_id ?? ""];
+      if (!sa) continue;
+      const m = overlapMin(s, from, to, now);
+      if (!m) continue;
+      (acc[sa.project_id] ??= {})[sa.name] = (acc[sa.project_id]?.[sa.name] ?? 0) + m;
+    }
+    return Object.fromEntries(Object.entries(acc).map(([pid, by]) => [pid, Object.entries(by).sort((a, b) => b[1] - a[1])]));
+  }, [sessions, subareasRec, tasksRec, ws, now]);
   const perDay = days.map((d) => {
     const [a, b] = dayBounds(d);
     return sumSessions(sessions, a, b, now);
@@ -102,6 +117,15 @@ export function WeekPage({ date, setDate }: { date: string; setDate: (d: string)
                     {target > 0 && (
                       <div className="h-1.5 rounded-full bg-zinc-100 dark:bg-zinc-800">
                         <div className="h-full rounded-full" style={{ width: `${Math.min(m / target, 1) * 100}%`, background: color }} />
+                      </div>
+                    )}
+                    {(subMinutes[p.id] ?? []).length > 0 && (
+                      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 pl-4 text-xs text-zinc-500">
+                        {subMinutes[p.id].map(([name, mm]) => (
+                          <span key={name}>
+                            {name} <b className="font-semibold text-zinc-700 tabular-nums dark:text-zinc-300">{fmtDur(mm)}</b>
+                          </span>
+                        ))}
                       </div>
                     )}
                   </li>

@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react';
-import { ArrowLeft, Check, Combine, Play, Plus, Repeat, Square, Trash2 } from 'lucide-react';
+import { ArrowLeft, Check, Combine, Play, Plus, Square, Trash2 } from 'lucide-react';
 import { addProject, deleteProject, mergeIntoArea, sameNamedArea, setTarget, stopTimer, timerForProject, toggleProjectDone, updateProject } from '../actions';
 import { Outcomes } from '../components/Outcomes';
-import { HabitRow, ListHeader, QuickAdd, TaskRow, useTrackedByTask } from '../components/TaskList';
+import { SubareaSection } from '../components/SubareaEditor';
+import { ListHeader, QuickAdd, TaskRow, useTrackedByTask } from '../components/TaskList';
 import { Button, Card, cn, fieldCls } from '../components/ui';
-import { useAlive, useAreaMap, useAreas, useLogSet, useNow, useRunning, useSessions, useToday } from '../hooks';
+import { useAlive, useAreaMap, useAreas, useNow, useRunning, useSessions, useToday } from '../hooks';
 import { addDays, dDay, diffDays, fmtDur, fmtShort, fromKey, weekStart } from '../lib/date';
-import { effectiveDue, overlapMin, streak, sumSessions, targetFor } from '../lib/stats';
+import { effectiveDue, overlapMin, sumSessions, targetFor } from '../lib/stats';
 import type { Project, ProjectKind, Task } from '../lib/types';
 import { useStore } from '../store';
 
@@ -352,38 +353,17 @@ function ProjectTasks({
   placeholder: string;
 }) {
   const today = useToday();
-  const habitsRec = useStore((s) => s.data.habits);
-  const logs = useLogSet();
-  // 이 프로젝트·꾸준히 안의 반복 할 일 — 정한 요일마다 오늘 목록 ①에 자동으로 뜬다
-  const repeats = Object.values(habitsRec)
-    .filter((h) => !h.deleted && !h.archived && h.project_id === p.id)
-    .sort((a, b) => a.sort - b.sort);
+  const subareas = useStore((s) => s.data.subareas);
   return (
     <div className="mt-5">
-      <h3 className="mb-2 text-sm font-bold">할 일</h3>
+      <SubareaSection p={p} />
+      <h3 className="mt-6 mb-2 text-sm font-bold">할 일</h3>
       <QuickAdd projectId={p.id} placeholder={`'${p.title}'에 할 일 추가 — ${placeholder}`} />
-      <div className="mt-3">
-        <div className="mb-1 flex items-baseline gap-2 px-1">
-          <Repeat className="size-3.5 text-zinc-400" />
-          <h4 className="text-[13px] font-semibold">반복</h4>
-          <span className="text-[11px] text-zinc-400">정한 요일마다 오늘 할 일에 자동으로 떠요 · 위 입력칸의 🔁로 추가</span>
-        </div>
-        {repeats.length > 0 ? (
-          <ul>
-            {repeats.map((h) => (
-              <HabitRow key={h.id} habit={h} date={today} logs={logs} streakDays={streak(h, logs, today)} />
-            ))}
-          </ul>
-        ) : (
-          <p className="px-3 py-2 text-xs text-zinc-400">아직 없어요. 예: 단어 50개 · 매일, 듣기 모의고사 · 화목</p>
-        )}
-      </div>
-      <h4 className="mt-4 mb-1 px-1 text-[13px] font-semibold">한 번 하는 일</h4>
       <div className="mt-2">
         <ListHeader />
         <ul>
           {open.map((t) => (
-            <TaskRow key={t.id} task={t} today={today} viewDate={today} tracked={tracked[t.id] ?? 0} showProject={false} pinnable />
+            <TaskRow key={t.id} task={t} today={today} viewDate={today} tracked={tracked[t.id] ?? 0} showProject={!!subareas[t.subarea_id ?? ""]} chipLabel={subareas[t.subarea_id ?? ""]?.name} pinnable />
           ))}
           {open.length === 0 && <li className="px-3 py-4 text-sm text-zinc-400">남은 할 일이 없어요.</li>}
         </ul>
@@ -392,7 +372,7 @@ function ProjectTasks({
             <summary className="cursor-pointer py-1 text-xs font-medium text-zinc-400">완료 {done.length}개</summary>
             <ul className="-mx-1">
               {done.map((t) => (
-                <TaskRow key={t.id} task={t} today={today} viewDate={today} tracked={tracked[t.id] ?? 0} showProject={false} />
+                <TaskRow key={t.id} task={t} today={today} viewDate={today} tracked={tracked[t.id] ?? 0} showProject={!!subareas[t.subarea_id ?? ""]} chipLabel={subareas[t.subarea_id ?? ""]?.name} />
               ))}
             </ul>
           </details>
@@ -407,7 +387,8 @@ function useProjectTasks(projectId: string) {
   const tasksRec = useStore((s) => s.data.tasks);
   const projects = useStore((s) => s.data.projects);
   return useMemo(() => {
-    const tasks = Object.values(tasksRec).filter((t) => !t.deleted && t.project_id === projectId);
+    // 세부 영역의 그날 할 일(routine)은 세부 영역 쪽에서 보고, 여기엔 직접 적은 할 일만
+    const tasks = Object.values(tasksRec).filter((t) => !t.deleted && !t.routine && t.project_id === projectId);
     const open = tasks
       .filter((t) => !t.done)
       .sort(

@@ -1,10 +1,10 @@
-import { atTime, todayKey, weekStart } from './lib/date';
+import { addDays, atTime, todayKey, weekdayIdx, weekStart } from './lib/date';
 import { DAILY_AREA } from './lib/defaults';
 import { logId, reviewId, uid } from './lib/ids';
 import { parseTask } from './lib/parse';
-import type { Area, BucketItem, BucketKind, Habit, Milestone, PlanSlot, Project, ProjectKind, Review, ReviewLevel, Session, Target, Task } from './lib/types';
+import type { Area, BucketItem, BucketKind, Habit, Milestone, PlanSlot, Project, ProjectKind, Review, ReviewLevel, Session, Subarea, Target, Task } from './lib/types';
 import { TABLES } from './lib/types';
-import { patchRow, putRows, userDailyArea, useStore, type Settings } from './store';
+import { patchRow, putRows, routineTaskId, userDailyArea, useStore, type Settings } from './store';
 
 const data = () => useStore.getState().data;
 
@@ -50,7 +50,7 @@ export const taskArea = (t: Pick<Task, 'project_id' | 'area_id'>) =>
 export function addTaskFromText(
   text: string,
   opts: { defaultDate?: string; projectId?: string; repeat?: number[] } = {},
-): { kind: 'task' | 'habit'; id: string } | null {
+): { kind: 'task' | 'habit' | 'subarea'; id: string } | null {
   const p = parseTask(text, activeProjects(), todayKey(), activeAreas());
   if (!p.title) return null;
   if (opts.repeat) p.repeat = opts.repeat; // 입력칸 옆 🔁 버튼으로 고른 반복
@@ -58,7 +58,15 @@ export function addTaskFromText(
   const area_id = data().projects[project_id]?.area_id ?? p.area_id ?? dailyId();
 
   if (p.repeat) {
-    return { kind: 'habit', id: addHabit(p.title, area_id, p.repeat, p.time ?? '', p.estimate ?? 0, project_id) };
+    // 프로젝트·꾸준히 안의 반복 = 고정 세부 영역, 그 밖은 반복 할 일
+    if (project_id) {
+      const id = addSubarea(project_id, p.title, {
+        cadence: 'days', weekdays: p.repeat, mode: 'fixed', fixed_title: p.title, estimate: p.estimate ?? 0, time: p.time ?? '',
+      });
+      ensureRoutineTasks(opts.defaultDate ?? todayKey());
+      return { kind: 'subarea', id };
+    }
+    return { kind: 'habit', id: addHabit(p.title, area_id, p.repeat, p.time ?? '', p.estimate ?? 0) };
   }
   const date = p.date ?? opts.defaultDate ?? todayKey();
   const task: Omit<Task, 'updated_at' | 'deleted'> = {
@@ -84,8 +92,20 @@ export function addTaskFromText(
  * 오늘 이미 끝낸 할 일이면 오늘 체크도 옮긴다. 원래 할 일은 지운다.
  */
 export function convertTaskToHabit(t: Task, weekdays: number[]) {
-  const id = addHabit(t.title, taskArea(t), weekdays, t.time, t.estimate, t.project_id);
-  if (t.done && t.done_on === todayKey()) toggleHabit(id, todayKey());
+  const today = todayKey();
+  if (t.project_id) {
+    // 프로젝트 할 일 → 고정 세부 영역. 오늘 이미 한 거면 오늘 할 일은 끝낸 상태로 이어간다
+    const saId = addSubarea(t.project_id, t.title, {
+      cadence: 'days', weekdays, mode: 'fixed', fixed_title: t.title, estimate: t.estimate, time: t.time,
+    });
+    deleteTask(t.id);
+    ensureRoutineTasks(today);
+    const rt = data().tasks[routineTaskId(saId, today)];
+    if (rt && t.done && t.done_on === today) updateTask(rt.id, { done: true, done_on: today });
+    return saId;
+  }
+  const id = addHabit(t.title, taskArea(t), weekdays, t.time, t.estimate);
+  if (t.done && t.done_on === today) toggleHabit(id, today);
   deleteTask(t.id);
   return id;
 }
@@ -112,6 +132,82 @@ export const updateProject = (id: string, patch: Partial<Project>) => patchRow('
 export const deleteProject = (id: string) => patchRow('projects', id, { deleted: true });
 export const toggleProjectDone = (p: Project) =>
   updateProject(p.id, p.done ? { done: false, done_on: '' } : { done: true, done_on: todayKey() });
+
+// ---------- 세부 영역 ----------
+
+export function addSubarea(project_id: string, name: string, opts: Partial<Subarea> = {}) {
+  const id = uid();
+  putRows('subareas', [
+    {
+      id, project_id, name: name.trim(), cadence: 'none', weekdays: [], mode: 'choose', fixed_title: '', estimate: 0, time: '',
+      sort: Date.now(), archived: false, created_on: todayKey(), skips: [], ...opts,
+    },
+  ]);
+  return id;
+}
+
+export const updateSubarea = (id: string, patch: Partial<Subarea>) => patchRow('subareas', id, patch);
+
+/** 그날이 이 세부 영역을 하는 날인지 */
+export const subareaDue = (sa: Subarea, date: string) =>
+  !sa.deleted && !sa.archived && sa.cadence === 'days' && date >= sa.created_on &&
+  (sa.weekdays.length === 0 || sa.weekdays.includes(weekdayIdx(date)));
+
+/**
+ * 고정 세부 영역의 그날 할 일을 만든다 (오늘부터 일주일 안의 날짜만 — 지난날은 만들지 않음).
+ * id가 날짜로 정해져서 여러 번·여러 기기에서 불러도 하나만 생기고, 지운 날은 다시 생기지 않는다.
+ */
+export function ensureRoutineTasks(date: string) {
+  const today = todayKey();
+  if (date < today || date > addDays(today, 7)) return;
+  const d = data();
+  const rows: Omit<Task, 'updated_at'>[] = [];
+  for (const sa of Object.values(d.subareas)) {
+    if (sa.mode !== 'fixed' || !subareaDue(sa, date)) continue;
+    const p = d.projects[sa.project_id];
+    if (!p || p.deleted || p.done) continue;
+    const id = routineTaskId(sa.id, date);
+    if (d.tasks[id]) continue;
+    rows.push({
+      id, title: sa.fixed_title || sa.name, project_id: sa.project_id, area_id: '', subarea_id: sa.id, routine: true,
+      date, due: date, time: sa.time, estimate: sa.estimate, important: false, done: false, done_on: '', sort: sa.sort, deleted: false,
+    });
+  }
+  putRows('tasks', rows);
+}
+
+/** "오늘 뭐 할까?"에서 고르거나 적은 것 → 그 세부 영역의 그날 할 일 */
+export function chooseForSubarea(sa: Subarea, title: string, date: string, estimate = 0) {
+  putRows('tasks', [
+    {
+      id: uid(), title: title.trim(), project_id: sa.project_id, area_id: '', subarea_id: sa.id, routine: true,
+      date, due: date, time: '', estimate: estimate || sa.estimate, important: false, done: false, done_on: '', sort: Date.now(),
+    },
+  ]);
+}
+
+export function toggleSkip(sa: Subarea, date: string) {
+  const skips = sa.skips ?? [];
+  const next = skips.includes(date) ? skips.filter((x) => x !== date) : [...skips, date];
+  updateSubarea(sa.id, { skips: next.sort().slice(-120) }); // 오래된 건 버린다
+}
+
+/** 그 세부 영역에서 예전에 했던 것: 자주 한 순서 → 최근 순, 예상 시간은 마지막 값 */
+export function subareaSuggestions(sa: Subarea, limit = 6) {
+  const by = new Map<string, { title: string; n: number; last: string; estimate: number }>();
+  for (const t of Object.values(data().tasks)) {
+    if (t.deleted || t.subarea_id !== sa.id || !t.title.trim()) continue;
+    const k = t.title.trim();
+    const cur = by.get(k) ?? { title: k, n: 0, last: '', estimate: 0 };
+    cur.n++;
+    if (t.date >= cur.last) {
+      cur.last = t.date;
+      cur.estimate = t.estimate;
+    }
+    by.set(k, cur);
+  }
+  return [...by.values()].sort((a, b) => b.n - a.n || b.last.localeCompare(a.last)).slice(0, limit);
+}
 
 // ---------- 성과 목표 ----------
 
