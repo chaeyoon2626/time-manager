@@ -54,7 +54,7 @@ export function WeekPage({ date, setDate }: { date: string; setDate: (d: string)
         <Stat label="기록한 시간" value={fmtDur(week.total)} sub="타이머" />
         <Stat label="하루 평균" value={fmtDur(week.total / Math.max(1, days.filter((d) => d <= today).length))} />
         <Stat label="끝낸 할 일" value={doneTasks} sub="개" />
-        <Stat label="습관 달성률" value={`${pct(done, scheduled)}%`} sub={`${done}/${scheduled}`} />
+        <Stat label="반복 달성률" value={`${pct(done, scheduled)}%`} sub={`${done}/${scheduled}`} />
       </div>
 
       <div className="grid grid-cols-[minmax(0,1fr)] gap-4 md:grid-cols-2">
@@ -131,15 +131,15 @@ export function WeekPage({ date, setDate }: { date: string; setDate: (d: string)
         </div>
       </Card>
 
-      <Card title="습관 체크표">
+      <Card title="반복 할 일 체크표">
         {habits.length === 0 ? (
-          <p className="py-3 text-sm text-zinc-400">아직 습관이 없어요. 설정에서 추가해 보세요.</p>
+          <p className="py-3 text-sm text-zinc-400">아직 반복 할 일이 없어요. 오늘 화면에서 “일기 매일”처럼 적어 보세요.</p>
         ) : (
           <div className="-mx-4 overflow-x-auto px-4">
             <table className="w-full min-w-[560px] border-separate border-spacing-y-1 text-sm">
               <thead>
                 <tr className="text-xs text-zinc-400">
-                  <th className="sticky left-0 bg-white pr-2 text-left font-medium dark:bg-zinc-900">습관</th>
+                  <th className="sticky left-0 bg-white pr-2 text-left font-medium dark:bg-zinc-900">반복 할 일</th>
                   {days.map((d, i) => (
                     <th key={d} className={cn('w-11 font-medium', d === today && 'text-zinc-900 dark:text-zinc-100')}>
                       <div>{DAY_LABELS[i]}</div>

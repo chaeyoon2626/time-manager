@@ -25,7 +25,7 @@ import { cn, fieldCls } from './ui';
 
 /**
  * 넓은 화면: 체크 | 할 일 | 분류 | 예상 | 마감 | 버튼
- * 분류 = 일회성 / 프로젝트 이름(취업준비, MST …) / 범주 이름(습관·꾸준히: 공부, 운동 …)
+ * 분류 = 프로젝트 이름(취업준비, MST …) / 범주 이름(프로젝트 없는 할 일·반복 할 일·꾸준히: 일상, 공부, 운동 …)
  */
 const GRID = 'md:grid md:grid-cols-[28px_minmax(0,1fr)_128px_76px_56px_96px] md:items-center md:gap-x-2';
 
