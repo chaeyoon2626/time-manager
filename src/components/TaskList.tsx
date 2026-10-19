@@ -354,7 +354,8 @@ export function TaskRow({
   // 세부 영역의 그날 할 일은 마감이 늘 그날이라 표시하지 않는다
   const due = t.routine ? '' : effectiveDue(t, projects);
   // 세부 영역의 그날 할 일은 그날만 보이고 밀림으로 치지 않는다
-  const late = !t.done && !t.routine && ((t.date && t.date < today) || (due && due < today));
+  // 밀림 = 마감(할 일 자체 마감, 없으면 프로젝트 마감)이 지난 것만. 시작일만 지난 건 진행 중
+  const late = !t.done && !t.routine && !!due && due < today;
   const isRunning = running?.task_id === t.id;
   const category = <Chip name={chipLabel ?? (p ? p.title : (area?.name ?? '일상'))} color={area?.color} />;
   const scheduledOther = t.date && t.date !== viewDate;
@@ -368,7 +369,7 @@ export function TaskRow({
       </span>
       {(late || (scheduledOther && !hideDate)) && !t.done && (
         <span className={cn('ml-2 text-[11px] font-medium', late ? 'text-rose-600' : 'text-zinc-400')}>
-          {late ? '밀림' : `${fmtShort(t.date)} 예정`}
+          {late ? '밀림' : t.date < viewDate ? `${fmtShort(t.date)}부터` : `${fmtShort(t.date)} 예정`}
         </span>
       )}
     </button>

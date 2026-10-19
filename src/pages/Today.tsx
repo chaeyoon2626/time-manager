@@ -60,7 +60,8 @@ export function TodayPage({ date, setDate }: { date: string; setDate: (d: string
     const all = Object.values(tasksRec).filter((t) => !t.deleted && !t.routine);
     const isToday = (t: Task) =>
       t.date === date || t.due === date || (date === today && ((!!t.date && t.date < today) || (!!t.due && t.due < today)));
-    const late = (t: Task) => (!!t.date && t.date < today) || (!!t.due && t.due < today);
+    // 밀림 = 마감이 지난 것만 (시작일만 지났으면 진행 중이라 ①에는 뜨지만 밀림은 아님)
+    const late = (t: Task) => { const d = effectiveDue(t, projects); return !!d && d < today; };
     const open = all.filter((t) => !t.done);
     const todayList = open
       .filter(isToday)
