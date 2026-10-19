@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Eraser } from 'lucide-react';
+import { Check, Eraser } from 'lucide-react';
 import { fillActual, planSlotId, sameTarget, setPlanSlots, type PlanTarget } from '../actions';
 import { useAreaMap, useNow, useProjectMap, useSessions } from '../hooks';
 import { dayBounds, fmtDur, slotLabel, toKey } from '../lib/date';
 import { overlapMin, pct } from '../lib/stats';
-import type { Habit, Project, Session, Task } from '../lib/types';
+import type { Habit, Session, Task } from '../lib/types';
+import { DAILY_AREA } from '../lib/defaults';
 import { useStore } from '../store';
 import { Card, cn } from './ui';
 
@@ -14,7 +15,7 @@ const MOVE_TOLERANCE = 8;
 const NONE = '#a1a1aa';
 
 type Col = 'plan' | 'actual';
-type Item = { key: string; target: PlanTarget; estimate: number; color: string; label: string };
+type Item = { key: string; target: PlanTarget; estimate: number; color: string; label: string; done: boolean };
 type Drag = { col: Col; anchor: number; last: number; moved: boolean };
 type Pending = { col: Col; slot: number; x: number; y: number; timer: ReturnType<typeof setTimeout> };
 
@@ -25,7 +26,7 @@ const keyOf = (t: { task_id: string; habit_id: string; project_id: string; title
  * 시간표: 왼쪽 "계획"(오늘 할 일을 골라 붙이기), 오른쪽 "실제"(타이머 기록이 분 단위로 그려짐).
  * 탭 = 예상 시간만큼 붙이기 / 꾹(폰)·끌기(PC) = 원하는 만큼 / 같은 일 다시 탭 = 그 덩어리 지우기
  */
-export function Timetable({ date, tasks, habits, steady }: { date: string; tasks: Task[]; habits: Habit[]; steady: Project[] }) {
+export function Timetable({ date, tasks, habits }: { date: string; tasks: Task[]; habits: Habit[] }) {
   const areas = useAreaMap();
   const projects = useProjectMap();
   const plan = useStore((s) => s.data.plan_slots);
@@ -37,33 +38,28 @@ export function Timetable({ date, tasks, habits, steady }: { date: string; tasks
   const [brushKey, setBrushKey] = useState<string | null>(null); // Item.key 또는 'erase'
   const [sel, setSel] = useState<{ col: Col; from: number; to: number } | null>(null);
 
-  // 넣을 수 있는 일: ① 오늘 할 일 → 꾸준히 → 습관
-  const items: Item[] = useMemo(() => {
-    const colorOfProject = (pid: string) => areas[projects[pid]?.area_id]?.color ?? NONE;
-    return [
+  // 넣을 수 있는 일: 오늘 할 일(끝낸 것 포함 — 끝낸 일에도 실제 시간을 넣을 수 있게) + 오늘의 반복 할 일
+  const items: Item[] = useMemo(
+    () => [
       ...tasks.map((t) => ({
         key: `t:${t.id}`,
         target: { task_id: t.id, habit_id: '', project_id: t.project_id, title: t.title },
         estimate: t.estimate,
-        color: colorOfProject(t.project_id),
+        color: areas[projects[t.project_id]?.area_id ?? (t.area_id || DAILY_AREA)]?.color ?? NONE,
         label: t.title,
-      })),
-      ...steady.map((p) => ({
-        key: `p:${p.id}`,
-        target: { task_id: '', habit_id: '', project_id: p.id, title: p.title },
-        estimate: 0,
-        color: areas[p.area_id]?.color ?? NONE,
-        label: p.title,
+        done: t.done,
       })),
       ...habits.map((h) => ({
         key: `h:${h.id}`,
         target: { task_id: '', habit_id: h.id, project_id: '', title: h.title },
-        estimate: 0,
+        estimate: h.estimate ?? 0,
         color: areas[h.area_id]?.color ?? NONE,
         label: h.title,
+        done: false,
       })),
-    ];
-  }, [tasks, steady, habits, areas, projects]);
+    ],
+    [tasks, habits, areas, projects],
+  );
 
   const brush = items.find((i) => i.key === brushKey) ?? null;
   const erasing = brushKey === 'erase';
@@ -202,7 +198,8 @@ export function Timetable({ date, tasks, habits, steady }: { date: string; tasks
   const daySessions = sessions.filter((s) => overlapMin(s, dayFrom, dayTo, now) > 0);
   const colorOf = (t: { task_id: string; habit_id: string; project_id: string }) => {
     if (t.habit_id) return areas[habitsRec[t.habit_id]?.area_id]?.color ?? NONE;
-    return areas[projects[t.project_id]?.area_id]?.color ?? NONE;
+    if (t.project_id) return areas[projects[t.project_id]?.area_id]?.color ?? NONE;
+    return areas[tasksRec[t.task_id]?.area_id || DAILY_AREA]?.color ?? NONE;
   };
   const sessionColor = (s: Session) => areas[s.area_id]?.color ?? colorOf(s);
   const inSel = (col: Col, slot: number) => sel && sel.col === col && slot >= Math.min(sel.from, sel.to) && slot <= Math.max(sel.from, sel.to);
@@ -289,7 +286,11 @@ export function Timetable({ date, tasks, habits, steady }: { date: string; tasks
                 )}
                 style={brushKey === it.key ? { background: it.color } : undefined}
               >
-                {brushKey !== it.key && <span className="size-2 shrink-0 rounded-full" style={{ background: it.color }} />}
+                {it.done ? (
+                  <Check className="size-3 shrink-0" strokeWidth={3} />
+                ) : (
+                  brushKey !== it.key && <span className="size-2 shrink-0 rounded-full" style={{ background: it.color }} />
+                )}
                 <span className="truncate">{it.label}</span>
                 {it.estimate > 0 && <span className="opacity-70">{fmtDur(it.estimate)}</span>}
               </button>
@@ -388,6 +389,7 @@ export function Timetable({ date, tasks, habits, steady }: { date: string; tasks
 function useComparison(date: string) {
   const plan = useStore((s) => s.data.plan_slots);
   const habits = useStore((s) => s.data.habits);
+  const tasks = useStore((s) => s.data.tasks);
   const sessions = useSessions();
   const projects = useProjectMap();
   const areas = useAreaMap();
@@ -397,8 +399,14 @@ function useComparison(date: string) {
     const daySlots = Object.values(plan).filter((p) => !p.deleted && p.date === date);
     const daySessions = sessions.filter((s) => overlapMin(s, from, to, now) > 0);
     const rows = new Map<string, { title: string; color: string; plan: number; actual: number }>();
-    const colorFor = (t: { habit_id: string; project_id: string; area_id?: string }) =>
-      areas[t.area_id ?? '']?.color ?? (t.habit_id ? areas[habits[t.habit_id]?.area_id]?.color : areas[projects[t.project_id]?.area_id]?.color) ?? NONE;
+    const colorFor = (t: { task_id: string; habit_id: string; project_id: string; area_id?: string }) =>
+      areas[t.area_id ?? '']?.color ??
+      (t.habit_id
+        ? areas[habits[t.habit_id]?.area_id]?.color
+        : t.project_id
+          ? areas[projects[t.project_id]?.area_id]?.color
+          : areas[tasks[t.task_id]?.area_id || DAILY_AREA]?.color) ??
+      NONE;
     const row = (key: string, title: string, color: string) => {
       if (!rows.has(key)) rows.set(key, { title, color, plan: 0, actual: 0 });
       return rows.get(key)!;
@@ -419,7 +427,7 @@ function useComparison(date: string) {
     const planTotal = daySlots.length * 30;
     const actualTotal = list.reduce((n, r) => n + r.actual, 0);
     return { list, planTotal, actualTotal, matchedPct: pct(matched, daySlots.length) };
-  }, [plan, habits, sessions, projects, areas, date, now]);
+  }, [plan, habits, tasks, sessions, projects, areas, date, now]);
 }
 
 function Summary({ date }: { date: string }) {

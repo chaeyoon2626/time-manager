@@ -7,6 +7,7 @@ import { HabitRow, ListHeader, QuickAdd, SectionTitle, SteadyRow, TaskRow, useTr
 import { Card, Stat, cn, textareaCls } from '../components/ui';
 import { useActiveProjects, useAreaMap, useHabits, useLogSet, useNow, useProjectMap, useSessions, useToday } from '../hooks';
 import { addDays, DAY_LABELS, dayBounds, diffDays, fmtDur, fmtShort, fromKey, weekdayIdx, weekStart } from '../lib/date';
+import { DAILY_AREA } from '../lib/defaults';
 import { logId, reviewId } from '../lib/ids';
 import { effectiveDue, isScheduled, streak, sumSessions } from '../lib/stats';
 import type { Tables, Task } from '../lib/types';
@@ -66,7 +67,7 @@ export function TodayPage({ date, setDate }: { date: string; setDate: (d: string
     // ②: 가장 가까운 날짜(할 날·마감 중 빠른 쪽)순, 같은 날짜 안에서는 분류끼리 모은다
     const groupRank = (t: Task) => {
       const p = projects[t.project_id];
-      if (!p) return [999, 0] as const; // 일회성은 그날 묶음의 맨 뒤
+      if (!p) return [areas[t.area_id || DAILY_AREA]?.sort ?? 99, Infinity] as const; // 프로젝트 없는 할 일은 그 범주 묶음의 뒤
       return [areas[p.area_id]?.sort ?? 99, p.sort] as const;
     };
     const laterList = open
@@ -89,7 +90,8 @@ export function TodayPage({ date, setDate }: { date: string; setDate: (d: string
 
   const todaysHabits = habits.filter((h) => isScheduled(h, date));
   const habitDone = todaysHabits.filter((h) => logs.has(logId(h.id, date))).length;
-  const planned = [...todayList, ...doneList].reduce((n, t) => n + t.estimate, 0);
+  // 예정 시간 = 오늘 할 일 + 오늘의 반복 할 일 예상 시간 합계
+  const planned = [...todayList, ...doneList].reduce((n, t) => n + t.estimate, 0) + todaysHabits.reduce((n, h) => n + (h.estimate ?? 0), 0);
   const [from, to] = dayBounds(date);
   const actual = sumSessions(sessions, from, to, now).total;
   const ws = weekStart(date);
@@ -102,10 +104,10 @@ export function TodayPage({ date, setDate }: { date: string; setDate: (d: string
         <Stat label="예정 시간" value={planned ? fmtDur(planned) : '–'} sub="예상 합계" />
         <Stat label="실제 시간" value={fmtDur(actual)} sub="타이머 기록" />
         <Stat label="할 일" value={doneList.length} sub={`/ ${todayList.length + doneList.length}개`} />
-        <Stat label="습관" value={habitDone} sub={`/ ${todaysHabits.length}개`} />
+        <Stat label="반복" value={habitDone} sub={`/ ${todaysHabits.length}개`} />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
         <div className="min-w-0 space-y-4">
         <section className="rounded-2xl border border-zinc-200/80 bg-white p-3 sm:p-4 dark:border-zinc-800 dark:bg-zinc-900">
           <QuickAdd defaultDate={date} />
@@ -170,11 +172,11 @@ export function TodayPage({ date, setDate }: { date: string; setDate: (d: string
             )}
           </div>
         </section>
-          <Timetable date={date} tasks={todayList} habits={todaysHabits} steady={steady} />
+          <Timetable date={date} tasks={[...todayList, ...doneList]} habits={todaysHabits} />
         </div>
 
         <div className="space-y-4 lg:sticky lg:top-[72px]">
-          <DayLog date={date} />
+          <DayLog date={date} tasks={[...todayList, ...doneList]} habits={todaysHabits} />
           <DailyReview date={date} />
         </div>
       </div>

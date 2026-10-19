@@ -89,7 +89,7 @@ export default function App() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 pt-5">
+      <main className="mx-auto max-w-6xl overflow-x-clip px-4 pt-5">
         {tab === 'today' && <TodayPage date={date} setDate={setDate} />}
         {tab === 'projects' && <ProjectsPage selected={sub} select={(id) => go('projects', id)} />}
         {tab === 'week' && <WeekPage date={date} setDate={setDate} />}

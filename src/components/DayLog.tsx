@@ -1,14 +1,14 @@
 import { useMemo, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
-import { addSession, deleteSession, updateSession } from '../actions';
+import { addSession, deleteSession, fillRange, updateSession, type PlanTarget } from '../actions';
 import { useActiveProjects, useAreaMap, useAreas, useNow, useProjectMap, useSessions } from '../hooks';
 import { atTime, dayBounds, fmtDur, hhmm } from '../lib/date';
 import { overlapMin, sumSessions } from '../lib/stats';
-import type { Session } from '../lib/types';
+import type { Habit, Session, Task } from '../lib/types';
 import { Button, Card, cn, fieldCls } from './ui';
 
-/** 그날 잰 시간: 하루 막대 + 기록 목록(고치기·지우기) + 직접 추가 */
-export function DayLog({ date }: { date: string }) {
+/** 그날 잰 시간: 범주별 합계 + 기록 목록(고치기·지우기) + 깜빡한 기록 추가 */
+export function DayLog({ date, tasks, habits }: { date: string; tasks: Task[]; habits: Habit[] }) {
   const sessions = useSessions();
   const areas = useAreaMap();
   const areaList = useAreas();
@@ -66,7 +66,7 @@ export function DayLog({ date }: { date: string }) {
       </ul>
 
       {adding ? (
-        <AddSession date={date} onDone={() => setAdding(false)} />
+        <AddSession date={date} tasks={tasks} habits={habits} onDone={() => setAdding(false)} />
       ) : (
         <Button className="-ml-1 mt-1 text-zinc-400" onClick={() => setAdding(true)}>
           <Plus className="size-4" /> 깜빡한 기록 추가
@@ -108,36 +108,66 @@ function SessionRow({ s, date, name, color, now }: { s: Session; date: string; n
   );
 }
 
-function AddSession({ date, onDone }: { date: string; onDone: () => void }) {
+/**
+ * 깜빡한 기록 추가. 오늘 할 일(끝낸 것 포함)·오늘의 반복 할 일을 그대로 골라 쓸 수 있다.
+ * value: "t:<할 일>", "h:<반복 할 일>", "p:<프로젝트>", "a:<범주>"
+ */
+function AddSession({ date, tasks, habits, onDone }: { date: string; tasks: Task[]; habits: Habit[]; onDone: () => void }) {
   const projects = useActiveProjects();
   const areas = useAreas();
-  // value: "p:<프로젝트 id>" 또는 "a:<범주 id>"
-  const [target, setTarget] = useState(projects[0] ? `p:${projects[0].id}` : areas[0] ? `a:${areas[0].id}` : '');
+  const first = tasks[0] ? `t:${tasks[0].id}` : habits[0] ? `h:${habits[0].id}` : projects[0] ? `p:${projects[0].id}` : `a:${areas[0]?.id ?? ''}`;
+  const [target, setTarget] = useState(first);
   const [start, setStart] = useState('09:00');
   const [end, setEnd] = useState('10:00');
   const [title, setTitle] = useState('');
+  const [msg, setMsg] = useState<string | null>(null);
   const sel = cn(fieldCls, 'h-8 px-2 text-[13px]');
+  const kind = target.slice(0, 1);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!target || end <= start) return;
-    const [kind, id] = [target.slice(0, 1), target.slice(2)];
+    const id = target.slice(2);
+    const t = kind === 't' ? tasks.find((x) => x.id === id) : undefined;
+    const h = kind === 'h' ? habits.find((x) => x.id === id) : undefined;
     const p = kind === 'p' ? projects.find((x) => x.id === id) : undefined;
-    addSession({
-      task_id: '',
-      habit_id: '',
-      project_id: p?.id ?? '',
-      area_id: p?.area_id ?? (kind === 'a' ? id : ''),
-      title: title.trim() || p?.title || '',
-      start: atTime(date, start),
-      end: atTime(date, end),
-    });
-    onDone();
+    const pt: PlanTarget = t
+      ? { task_id: t.id, habit_id: '', project_id: t.project_id, title: t.title }
+      : h
+        ? { task_id: '', habit_id: h.id, project_id: '', title: h.title }
+        : { task_id: '', habit_id: '', project_id: p?.id ?? '', title: title.trim() || p?.title || '' };
+    if (kind === 'a') {
+      // 범주만 고른 경우: 범주를 직접 지정해서 남긴다
+      addSession({ ...pt, area_id: id, start: atTime(date, start), end: atTime(date, end) });
+      return onDone();
+    }
+    // 이미 기록된 시간과 겹치는 부분은 건너뛰고 채운다
+    if (fillRange(Date.parse(atTime(date, start)), Date.parse(atTime(date, end)), pt)) onDone();
+    else setMsg('그 시간은 이미 다른 기록으로 채워져 있어요.');
   };
 
   return (
     <form onSubmit={submit} className="mt-2 space-y-2 rounded-xl border border-zinc-200 p-3 dark:border-zinc-700">
       <select value={target} onChange={(e) => setTarget(e.target.value)} className={cn(sel, 'w-full')} aria-label="무엇을 했나">
+        {tasks.length > 0 && (
+          <optgroup label="오늘 할 일">
+            {tasks.map((t) => (
+              <option key={t.id} value={`t:${t.id}`}>
+                {t.done ? '✓ ' : ''}
+                {t.title}
+              </option>
+            ))}
+          </optgroup>
+        )}
+        {habits.length > 0 && (
+          <optgroup label="오늘의 반복 할 일">
+            {habits.map((h) => (
+              <option key={h.id} value={`h:${h.id}`}>
+                {h.title}
+              </option>
+            ))}
+          </optgroup>
+        )}
         {projects.length > 0 && (
           <optgroup label="프로젝트 · 꾸준히">
             {projects.map((p) => (
@@ -155,8 +185,11 @@ function AddSession({ date, onDone }: { date: string; onDone: () => void }) {
           ))}
         </optgroup>
       </select>
-      <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="무엇을 했나요 (선택)" className={cn(sel, 'w-full')} />
-      <div className="flex items-center gap-2 text-sm">
+      {(kind === 'p' || kind === 'a') && (
+        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="무엇을 했나요 (선택)" className={cn(sel, 'w-full')} />
+      )}
+      {msg && <p className="text-xs text-rose-600">{msg}</p>}
+      <div className="flex flex-wrap items-center gap-2 text-sm">
         <input type="time" value={start} onChange={(e) => setStart(e.target.value)} className={sel} aria-label="시작" />–
         <input type="time" value={end} onChange={(e) => setEnd(e.target.value)} className={sel} aria-label="끝" />
         <Button type="submit" variant="primary" className="ml-auto" disabled={end <= start}>

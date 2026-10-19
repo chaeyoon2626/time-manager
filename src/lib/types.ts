@@ -3,6 +3,7 @@ export type Base = { id: string; updated_at: string; deleted: boolean };
 /** 범주 (커리어·취미·공부·운동 + 직접 추가, 최대 9개) */
 export type Area = Base & { name: string; color: string; required: boolean; is_waste: boolean; sort: number };
 
+/** 반복 할 일 (예전 이름: 습관) — 매일 또는 정한 요일마다 오늘 목록에 자동으로 뜬다 */
 export type Habit = Base & {
   area_id: string;
   title: string;
@@ -10,6 +11,8 @@ export type Habit = Base & {
   sort: number;
   archived: boolean;
   created_on: string;
+  time?: string; // 'HH:MM' (예: 학원 19:00), '' = 없음
+  estimate?: number; // 예상 시간(분)
 };
 export type HabitLog = Base & { habit_id: string; date: string };
 
@@ -48,7 +51,8 @@ export type Project = Base & {
 
 export type Task = Base & {
   title: string;
-  project_id: string; // '' = 일회성
+  project_id: string; // '' = 프로젝트 없음 → area_id 범주(기본 일상)로 분류
+  area_id?: string; // 프로젝트 없는 할 일의 범주, 없으면 'daily'
   date: string; // 하기로 한 날, '' = 미정
   due: string; // 마감일, '' = 없음
   time: string; // 'HH:MM' 약속 시각, '' = 없음
@@ -91,7 +95,14 @@ export type Review = Base & {
   next_action: string;
 };
 
+/**
+ * bucket = 시간 날 때 해볼 것 (걸리는 시간으로 거르기)
+ * idea   = 하고 싶은 것 (서평 블로그 운영 …) — 아직 목표로 삼긴 이른 것, 나중에 프로젝트·꾸준히로 올린다
+ */
+export type BucketKind = 'bucket' | 'idea';
 export type BucketItem = Base & {
+  kind?: BucketKind; // 없으면 bucket
+  note?: string;
   title: string;
   area_id: string; // '' = 범주 없음
   minutes: number; // 대략 걸리는 시간, 0 = 모름

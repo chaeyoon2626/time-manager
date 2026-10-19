@@ -12,8 +12,8 @@ import {
 } from '../actions';
 import { Button, Card, Switch, cn, fieldCls, inputCls } from '../components/ui';
 import { useAreas, useHabits } from '../hooks';
-import { DAY_LABELS } from '../lib/date';
-import { AREA_PALETTE, MAX_AREAS } from '../lib/defaults';
+import { DAY_LABELS, fmtDur } from '../lib/date';
+import { AREA_PALETTE, RECOMMENDED_AREAS } from '../lib/defaults';
 import { supabase } from '../lib/supabase';
 import type { Habit } from '../lib/types';
 import { useStore } from '../store';
@@ -128,12 +128,12 @@ function Areas() {
   const nextColor = AREA_PALETTE.find((c) => !used.has(c)) ?? AREA_PALETTE[0];
   const [name, setName] = useState('');
   const [color, setColor] = useState<string | null>(null);
-  const full = areas.length >= MAX_AREAS;
+  const over = areas.length >= RECOMMENDED_AREAS;
 
   return (
-    <Card title={`범주 ${areas.length}/${MAX_AREAS}`}>
+    <Card title={`범주 ${areas.length}개`}>
       <p className="mb-3 text-xs text-zinc-400">
-        시간·습관·프로젝트를 나누는 큰 칸이에요. 프로젝트(MST 등)와 꾸준히(영어 등)는 각각 범주 하나에 들어가요.{' '}
+        시간·반복 할 일·프로젝트를 나누는 큰 칸이에요. 프로젝트 없는 할 일은 기본으로 <b>일상</b>에 들어가요.{' '}
         <b>필수</b>를 켜면 그 주에 기록이 없을 때 “기록 없음”으로 알려줘요.
       </p>
       <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
@@ -166,9 +166,6 @@ function Areas() {
           </li>
         ))}
       </ul>
-      {full ? (
-        <p className="mt-3 border-t border-zinc-100 pt-3 text-xs text-zinc-400 dark:border-zinc-800">범주는 최대 {MAX_AREAS}개까지예요.</p>
-      ) : (
         <form
           className="mt-3 flex items-center gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800"
           onSubmit={(e) => {
@@ -187,6 +184,10 @@ function Areas() {
             추가
           </Button>
         </form>
+      {over && (
+        <p className="mt-2 text-xs text-amber-600">
+          {RECOMMENDED_AREAS}개가 넘었어요. 더 만들어도 되지만, 너무 많으면 한눈에 보기 어려워요.
+        </p>
       )}
     </Card>
   );
@@ -203,18 +204,21 @@ function Habits() {
 
   return (
     <Card
-      title="습관"
+      title="반복 할 일"
       action={
         archivedN > 0 && (
           <Button onClick={() => setShowArchived(!showArchived)}>{showArchived ? '사용 중 보기' : `보관함 ${archivedN}`}</Button>
         )
       }
     >
+      <p className="mb-2 text-xs text-zinc-400">
+        정한 요일마다 오늘 목록에 자동으로 떠요 (일기, 학원, 운동 …). 오늘 화면에서 <b>“일기 매일 22:00 20분”</b>, <b>“학원 월수금 19:00 2h”</b>처럼 적어도 만들어져요.
+      </p>
       <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
         {list.map((h) => (
           <HabitEditor key={h.id} habit={h} areas={areas} />
         ))}
-        {list.length === 0 && <li className="py-3 text-sm text-zinc-400">{showArchived ? '보관한 습관이 없어요.' : '습관이 없어요.'}</li>}
+        {list.length === 0 && <li className="py-3 text-sm text-zinc-400">{showArchived ? '보관한 반복 할 일이 없어요.' : '반복 할 일이 없어요.'}</li>}
       </ul>
       {!showArchived && (
         <form
@@ -233,7 +237,7 @@ function Habits() {
               </option>
             ))}
           </select>
-          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="새 습관" className={cn(fieldCls, 'h-9 min-w-0 flex-1 px-3')} />
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="새 반복 할 일" className={cn(fieldCls, 'h-9 min-w-0 flex-1 px-3')} />
           <Button type="submit" variant="primary" className="h-9 shrink-0">
             추가
           </Button>
@@ -260,7 +264,7 @@ function HabitEditor({ habit: h, areas }: { habit: Habit; areas: ReturnType<type
             </option>
           ))}
         </select>
-        <input value={h.title} onChange={(e) => updateHabit(h.id, { title: e.target.value })} className={cn(fieldCls, 'h-8 min-w-0 flex-1 px-3')} aria-label="습관 이름" />
+        <input value={h.title} onChange={(e) => updateHabit(h.id, { title: e.target.value })} className={cn(fieldCls, 'h-8 min-w-0 flex-1 px-3')} aria-label="반복 할 일 이름" />
         <Button aria-label={h.archived ? '복원' : '보관'} title={h.archived ? '복원' : '보관 (기록은 남아요)'} className="w-8 shrink-0 px-0" onClick={() => updateHabit(h.id, { archived: !h.archived })}>
           {h.archived ? <ArchiveRestore className="size-4" /> : <Archive className="size-4" />}
         </Button>
@@ -282,6 +286,18 @@ function HabitEditor({ habit: h, areas }: { habit: Habit; areas: ReturnType<type
           );
         })}
         <span className="ml-2 text-xs text-zinc-400">{h.weekdays.length === 0 ? '매일' : `주 ${h.weekdays.length}회`}</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+        시각
+        <input type="time" value={h.time ?? ''} onChange={(e) => updateHabit(h.id, { time: e.target.value })} className={cn(fieldCls, 'h-8 px-2 text-xs')} aria-label="시각" />
+        예상
+        <select value={h.estimate ?? 0} onChange={(e) => updateHabit(h.id, { estimate: Number(e.target.value) })} className={cn(fieldCls, 'h-8 px-2 text-xs')} aria-label="예상 시간">
+          {[0, 10, 15, 20, 30, 45, 60, 90, 120, 180].map((m) => (
+            <option key={m} value={m}>
+              {m ? fmtDur(m) : '모름'}
+            </option>
+          ))}
+        </select>
       </div>
     </li>
   );

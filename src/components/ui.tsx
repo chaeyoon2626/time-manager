@@ -91,9 +91,9 @@ export function Stat({ label, value, sub }: { label: string; value: ReactNode; s
   return (
     <div className="rounded-2xl border border-zinc-200/80 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900">
       <div className="text-xs font-medium text-zinc-500 dark:text-zinc-400">{label}</div>
-      <div className="mt-1 flex items-baseline gap-1.5">
-        <span className="text-2xl font-bold tracking-tight tabular-nums">{value}</span>
-        {sub && <span className="text-xs text-zinc-400 tabular-nums">{sub}</span>}
+      <div className="mt-1 flex flex-wrap items-baseline gap-x-1.5">
+        <span className="text-2xl font-bold tracking-tight whitespace-nowrap tabular-nums">{value}</span>
+        {sub && <span className="text-xs whitespace-nowrap text-zinc-400 tabular-nums">{sub}</span>}
       </div>
     </div>
   );

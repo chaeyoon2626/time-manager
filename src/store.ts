@@ -125,6 +125,35 @@ function migrateAreasV2(data: Tables): Tables {
   return { ...data, areas };
 }
 
+/**
+ * v4:
+ *  - "일회성"이 없어지고 기본 범주 "일상"이 생겼다 → 프로젝트 없는 할 일은 일상으로
+ *  - 실제 칸을 여러 번 누르면 같은 기록이 겹쳐 쌓이던 버그의 흔적 정리:
+ *    같은 일 · 같은 시작 · 같은 끝인 기록은 하나만 남긴다
+ */
+function migrateV4(p: Persisted): Persisted {
+  const now = new Date().toISOString();
+  const tasks = { ...p.data.tasks };
+  const sessions = { ...p.data.sessions };
+  const dirty = { ...p.dirty };
+  for (const [id, t] of Object.entries(tasks)) {
+    if (!t.project_id && !t.area_id) {
+      tasks[id] = { ...t, area_id: 'daily', updated_at: now };
+      dirty[`tasks:${id}`] = true;
+    }
+  }
+  const seen = new Set<string>();
+  for (const s of Object.values(sessions).sort((a, b) => a.updated_at.localeCompare(b.updated_at))) {
+    if (s.deleted || !s.end) continue;
+    const key = [s.task_id, s.habit_id, s.project_id, s.title, s.start, s.end].join('|');
+    if (seen.has(key)) {
+      sessions[s.id] = { ...s, deleted: true, updated_at: now };
+      dirty[`sessions:${s.id}`] = true;
+    } else seen.add(key);
+  }
+  return { ...p, data: { ...p.data, tasks, sessions }, dirty };
+}
+
 // IndexedDB 저장은 0.4초 모아서 한 번에 (입력할 때마다 디스크에 쓰지 않도록)
 let pending: { name: string; value: StorageValue<Persisted> } | null = null;
 let flushTimer: ReturnType<typeof setTimeout> | undefined;
@@ -160,12 +189,13 @@ export const useStore = create<State>()(
     }),
     {
       name: 'focus-planner',
-      version: 3,
+      version: 4,
       migrate: (persisted, version) => {
         let p = persisted as Persisted;
         if (!p?.data) return p;
         if (version < 2) p = { ...p, data: migrateAreasV2(p.data) };
         if (version < 3) p = migrateV3(p);
+        if (version < 4) p = migrateV4(p);
         return p;
       },
       storage,

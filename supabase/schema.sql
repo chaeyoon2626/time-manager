@@ -105,6 +105,7 @@ create table if not exists public.tasks (
 alter table public.tasks alter column date type text using date::text;
 alter table public.tasks alter column date set default '';
 alter table public.tasks add column if not exists project_id text not null default '';
+alter table public.tasks add column if not exists area_id    text not null default 'daily'; -- 프로젝트 없는 할 일의 범주
 alter table public.tasks add column if not exists due        text not null default '';
 alter table public.tasks add column if not exists time       text not null default '';
 alter table public.tasks add column if not exists estimate   int  not null default 0;
@@ -152,6 +153,10 @@ create table if not exists public.plan_slots (
   primary key (user_id, id)
 );
 
+-- 반복 할 일(예전 이름: 습관)의 시각·예상 시간
+alter table public.habits add column if not exists time     text not null default '';
+alter table public.habits add column if not exists estimate int  not null default 0;
+
 -- 예전 버전의 칠하는 타임바 (지금은 읽기만, 기록은 sessions로 옮겨짐)
 create table if not exists public.time_blocks (
   user_id    uuid not null default auth.uid() references auth.users on delete cascade,
@@ -196,6 +201,9 @@ create table if not exists public.bucket_items (
   synced_at  timestamptz not null default clock_timestamp(),
   primary key (user_id, id)
 );
+-- bucket = 시간 날 때 해볼 것, idea = 하고 싶은 것
+alter table public.bucket_items add column if not exists kind text not null default 'bucket';
+alter table public.bucket_items add column if not exists note text not null default '';
 
 -- 공통: 본인 행만 읽고 쓰기(RLS) + synced_at 트리거 + 인덱스
 do $$

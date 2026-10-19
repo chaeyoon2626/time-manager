@@ -16,7 +16,7 @@ export function ProjectsPage({ selected, select }: { selected: string | null; se
   const projects = useAlive('projects');
   const sel = selected ? projects.find((p) => p.id === selected) : undefined;
   return (
-    <div className="grid gap-4 md:grid-cols-[300px_minmax(0,1fr)] md:items-start">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-4 md:grid-cols-[300px_minmax(0,1fr)] md:items-start">
       <div className={cn(sel && 'hidden md:block')}>
         <ProjectList selected={selected} select={select} />
       </div>

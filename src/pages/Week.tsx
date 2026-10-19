@@ -57,7 +57,7 @@ export function WeekPage({ date, setDate }: { date: string; setDate: (d: string)
         <Stat label="습관 달성률" value={`${pct(done, scheduled)}%`} sub={`${done}/${scheduled}`} />
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-4 md:grid-cols-2">
         <Card title="범주 밸런스">
           <div className="space-y-3">
             {areas.map((a) => {

@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { CalendarPlus, Check, Flame, Play, Square, Star, Trash2 } from 'lucide-react';
+import { CalendarPlus, Check, Flame, Play, Repeat, Square, Star, Trash2 } from 'lucide-react';
 import {
   activeMilestone,
   addTaskFromText,
@@ -12,8 +12,9 @@ import {
   toggleTask,
   updateTask,
 } from '../actions';
-import { useActiveProjects, useAreaMap, useNow, useProjectMap, useRunning, useSessions } from '../hooks';
-import { addDays, dDay, diffDays, fmtDur, fmtShort, weekStart } from '../lib/date';
+import { useActiveProjects, useAreaMap, useAreas, useNow, useProjectMap, useRunning, useSessions, useToday } from '../hooks';
+import { addDays, DAY_LABELS, dDay, diffDays, fmtDur, fmtShort, weekStart } from '../lib/date';
+import { DAILY_AREA } from '../lib/defaults';
 import { logId } from '../lib/ids';
 import { parseTask } from '../lib/parse';
 import { effectiveDue, overlapMin, targetFor } from '../lib/stats';
@@ -53,11 +54,14 @@ export function SectionTitle({ n, title, right }: { n: number; title: string; ri
   );
 }
 
-const OnceBadge = () => (
-  <span className="inline-flex h-5 items-center rounded bg-zinc-100 px-1.5 text-[11px] font-semibold whitespace-nowrap text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-    일회성
-  </span>
-);
+/** 반복 요일 → "매일", "평일", "월수금" */
+export const repeatLabel = (weekdays: number[]) => {
+  if (weekdays.length === 0 || weekdays.length === 7) return '매일';
+  const s = [...weekdays].sort((a, b) => a - b).join('');
+  if (s === '01234') return '평일';
+  if (s === '56') return '주말';
+  return weekdays.map((d) => DAY_LABELS[d]).join('');
+};
 
 function Chip({ name, color }: { name?: string; color?: string }) {
   if (!name) return <span className="text-zinc-300 dark:text-zinc-600">—</span>;
@@ -173,11 +177,11 @@ export function TaskRow({
   const running = useRunning();
   const [open, setOpen] = useState(false);
   const p = projects[t.project_id];
-  const area = p ? areas[p.area_id] : undefined;
+  const area = areas[p ? p.area_id : t.area_id || DAILY_AREA];
   const due = effectiveDue(t, projects);
   const late = !t.done && ((t.date && t.date < today) || (due && due < today));
   const isRunning = running?.task_id === t.id;
-  const category = p ? <Chip name={p.title} color={area?.color} /> : <OnceBadge />;
+  const category = <Chip name={p ? p.title : (area?.name ?? '일상')} color={area?.color} />;
   const scheduledOther = t.date && t.date !== viewDate;
 
   const title = (
@@ -238,6 +242,7 @@ const ESTIMATES = [0, 15, 30, 45, 60, 90, 120, 180, 240];
 function TaskEditor({ task: t, today, tracked, onClose }: { task: Task; today: string; tracked: number; onClose: () => void }) {
   const projects = useActiveProjects();
   const projectMap = useProjectMap();
+  const areaList = useAreas();
   const lbl = 'mb-1 block text-[11px] font-medium text-zinc-400';
   const small = cn(fieldCls, 'h-8 w-full px-2 text-[13px]');
   const quick = (label: string, active: boolean, onClick: () => void) => (
@@ -259,8 +264,22 @@ function TaskEditor({ task: t, today, tracked, onClose }: { task: Task; today: s
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <label className="block">
           <span className={lbl}>분류</span>
-          <select value={t.project_id} onChange={(e) => updateTask(t.id, { project_id: e.target.value })} className={small}>
-            <option value="">일회성</option>
+          {/* 값: "p:<프로젝트>" 또는 "a:<범주>" (프로젝트 없이 범주만) */}
+          <select
+            value={t.project_id ? `p:${t.project_id}` : `a:${t.area_id || DAILY_AREA}`}
+            onChange={(e) => {
+              const [k, id] = [e.target.value.slice(0, 1), e.target.value.slice(2)];
+              updateTask(t.id, k === 'p' ? { project_id: id } : { project_id: '', area_id: id });
+            }}
+            className={small}
+          >
+            <optgroup label="범주 (프로젝트 없이)">
+              {areaList.map((a) => (
+                <option key={a.id} value={`a:${a.id}`}>
+                  {a.name}
+                </option>
+              ))}
+            </optgroup>
             {(
               [
                 ['project', '프로젝트'],
@@ -272,7 +291,7 @@ function TaskEditor({ task: t, today, tracked, onClose }: { task: Task; today: s
                   {options
                     .filter((p) => p.kind === kind)
                     .map((p) => (
-                      <option key={p.id} value={p.id}>
+                      <option key={p.id} value={`p:${p.id}`}>
                         {p.title}
                       </option>
                     ))}
@@ -349,9 +368,17 @@ export function HabitRow({ habit: h, date, logs, streakDays }: { habit: Habit; d
       <div className={cn('flex items-start gap-3', GRID)}>
         <CheckButton done={done} color={area?.color} onClick={() => toggleHabit(h.id, date)} label={done ? '완료 취소' : '완료'} />
         <div className="min-w-0 flex-1">
-          <span className={cn('text-[15px] leading-snug', done && 'text-zinc-400 line-through decoration-zinc-300 dark:decoration-zinc-600')}>{h.title}</span>
+          <span className={cn('text-[15px] leading-snug break-words', done && 'text-zinc-400 line-through decoration-zinc-300 dark:decoration-zinc-600')}>
+            {h.time && <b className="mr-1.5 font-semibold text-indigo-600 tabular-nums dark:text-indigo-400">{h.time}</b>}
+            {h.title}
+          </span>
+          <span className="ml-2 inline-flex items-center gap-0.5 text-[11px] font-medium text-zinc-400">
+            <Repeat className="size-3" />
+            {repeatLabel(h.weekdays)}
+          </span>
           <MobileMeta>
             <Chip name={area?.name} color={area?.color} />
+            {!!h.estimate && <EstimateText estimate={h.estimate} tracked={0} />}
             {fire}
           </MobileMeta>
         </div>
@@ -359,7 +386,7 @@ export function HabitRow({ habit: h, date, logs, streakDays }: { habit: Habit; d
           <Chip name={area?.name} color={area?.color} />
         </div>
         <div className="hidden md:block">
-          <span className="text-zinc-300 dark:text-zinc-600">–</span>
+          <EstimateText estimate={h.estimate ?? 0} tracked={0} />
         </div>
         <div className="hidden md:block">{fire || <span className="text-zinc-300 dark:text-zinc-600">–</span>}</div>
         <div className="flex shrink-0 justify-end">
@@ -428,45 +455,61 @@ export function SteadyRow({ project: p, today, weekMinutes }: { project: Project
 
 // ---------- 빠른 입력 ----------
 
-export function QuickAdd({ defaultDate, projectId, placeholder }: { defaultDate: string; projectId?: string; placeholder?: string }) {
+export function QuickAdd({ defaultDate, projectId, placeholder }: { defaultDate?: string; projectId?: string; placeholder?: string }) {
   const [text, setText] = useState('');
+  const [made, setMade] = useState<string | null>(null);
   const projects = useActiveProjects();
   const projectMap = useProjectMap();
-  const parsed = text.trim() ? parseTask(text, projects) : null;
+  const areaList = useAreas();
+  const areaMap = useAreaMap();
+  const today = useToday();
+  const parsed = text.trim() ? parseTask(text, projects, today, areaList) : null;
   const pid = parsed?.project_id ?? projectId;
   const chips: string[] = [];
   if (parsed) {
-    if (pid) chips.push(`📁 ${projectMap[pid]?.title}`);
-    else chips.push('일회성');
-    const date = parsed.date ?? (pid ? '' : defaultDate);
-    chips.push(date ? `📅 ${fmtShort(date)}` : '📅 날짜 미정');
+    chips.push(pid ? `📁 ${projectMap[pid]?.title}` : `● ${areaMap[parsed.area_id ?? DAILY_AREA]?.name ?? '일상'}`);
+    if (parsed.repeat) {
+      chips.push(`🔁 ${repeatLabel(parsed.repeat)} 반복`);
+    } else {
+      // 날짜를 안 적으면 오늘(보고 있는 날) 시작 · 그날 마감
+      const date = parsed.date ?? defaultDate ?? today;
+      chips.push(`📅 ${fmtShort(date)}`);
+      chips.push(`⚑ 마감 ${fmtShort(parsed.due ?? date)}`);
+    }
     if (parsed.time) chips.push(`🕑 ${parsed.time}`);
     if (parsed.estimate) chips.push(`⏱ ${fmtDur(parsed.estimate)}`);
-    if (parsed.due) chips.push(`⚑ 마감 ${fmtShort(parsed.due)}`);
-    if (parsed.important) chips.push('★ 중요');
+    if (parsed.important && !parsed.repeat) chips.push('★ 중요');
   }
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        if (addTaskFromText(text, { defaultDate, projectId })) setText('');
+        const r = addTaskFromText(text, { defaultDate, projectId });
+        if (!r) return;
+        setText('');
+        setMade(r.kind === 'habit' ? '반복 할 일로 만들었어요 — 설정에서 고칠 수 있어요' : null);
+        if (r.kind === 'habit') setTimeout(() => setMade(null), 3000);
       }}
     >
       <input
         value={text}
         onChange={(e) => setText(e.target.value)}
-        placeholder={placeholder ?? '할 일 추가 — 예: 자소서 제출 #취업준비 내일 1h ~10/19 !'}
-        className={cn(fieldCls, 'h-11 w-full rounded-xl px-4 text-[15px] shadow-[0_1px_2px_rgba(0,0,0,0.03)]')}
+        placeholder={placeholder ?? '할 일 추가 — 예: 자소서 제출 #취업준비 내일 1h !'}
+        className={cn(fieldCls, 'h-11 w-full min-w-0 rounded-xl px-4 text-[15px] shadow-[0_1px_2px_rgba(0,0,0,0.03)]')}
       />
-      <div className="mt-1.5 flex min-h-5 flex-wrap gap-1.5 px-1 text-[11px] text-zinc-500">
+      <div className="mt-1.5 flex min-h-5 min-w-0 flex-wrap gap-1.5 px-1 text-[11px] text-zinc-500">
         {parsed ? (
           chips.map((c) => (
             <span key={c} className="rounded-md bg-zinc-100 px-1.5 py-0.5 dark:bg-zinc-800">
               {c}
             </span>
           ))
+        ) : made ? (
+          <span className="font-medium text-emerald-600">{made}</span>
         ) : (
-          <span className="text-zinc-400">#프로젝트 · 오늘/내일/금요일/10/19 · 14:00 · 1h · ~10/19(마감) · !(중요) — 아무것도 안 붙여도 돼요</span>
+          <span className="min-w-0 text-zinc-400">
+            #프로젝트·#범주 · 내일/금요일/10/19 · 14:00 · 1h · ~10/19(마감) · ! · 매일/월수금(반복) — 날짜 없으면 오늘 시작·오늘 마감
+          </span>
         )}
       </div>
     </form>
