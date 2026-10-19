@@ -3,6 +3,7 @@ import { CalendarPlus, Check, Flame, Play, Repeat, Square, Star, Trash2 } from '
 import {
   activeMilestone,
   addTaskFromText,
+  convertTaskToHabit,
   deleteTask,
   stopTimer,
   timerForHabit,
@@ -10,9 +11,10 @@ import {
   timerForTask,
   toggleHabit,
   toggleTask,
+  updateHabit,
   updateTask,
 } from '../actions';
-import { useActiveProjects, useAreaMap, useAreas, useNow, useProjectMap, useRunning, useSessions, useToday } from '../hooks';
+import { useActiveProjects, useAreaMap, useAreas, useDailyId, useNow, useProjectMap, useRunning, useSessions, useToday } from '../hooks';
 import { addDays, DAY_LABELS, dDay, diffDays, fmtDur, fmtShort, weekStart } from '../lib/date';
 import { DAILY_AREA } from '../lib/defaults';
 import { logId } from '../lib/ids';
@@ -50,6 +52,133 @@ export function SectionTitle({ n, title, right }: { n: number; title: string; ri
       </span>
       <h2 className="text-[15px] font-bold tracking-tight">{title}</h2>
       {right && <span className="ml-auto text-xs text-zinc-400 tabular-nums">{right}</span>}
+    </div>
+  );
+}
+
+/** 할 일 편집기 안의 "반복" 줄: 요일을 고르면 반복 할 일로 바꾸기 */
+function RepeatConvert({ task, onDone }: { task: Task; onDone: () => void }) {
+  const [days, setDays] = useState<number[] | null>(null);
+  return (
+    <div className="mt-3 rounded-lg bg-zinc-50 px-3 py-2.5 dark:bg-zinc-800/50">
+      {days === null ? (
+        <button onClick={() => setDays([])} className="flex items-center gap-1.5 text-xs font-medium text-zinc-600 hover:text-zinc-900 dark:text-zinc-300">
+          <Repeat className="size-3.5" /> 반복하기 — 매일·평일·요일마다 오늘 목록에 자동으로 뜨게
+        </button>
+      ) : (
+        <div className="space-y-2">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-zinc-500">
+            <Repeat className="size-3.5" /> 언제 반복할까요?
+          </div>
+          <DayPicker value={days} onChange={setDays} />
+          <div className="flex gap-1.5">
+            <button
+              onClick={() => {
+                convertTaskToHabit(task, days);
+                onDone();
+              }}
+              className="h-7 rounded-lg bg-zinc-900 px-3 text-xs font-semibold text-white dark:bg-zinc-100 dark:text-zinc-900"
+            >
+              {repeatLabel(days)} 반복으로 바꾸기
+            </button>
+            <button onClick={() => setDays(null)} className="h-7 rounded-lg px-2 text-xs text-zinc-500">
+              취소
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 반복 할 일 편집 (오늘 목록에서 눌러서): 이름·요일·시각·예상 시간·범주, 반복 그만두기 */
+function HabitEditorInline({ habit: h, onClose }: { habit: Habit; onClose: () => void }) {
+  const areaList = useAreas();
+  const lbl = 'mb-1 block text-[11px] font-medium text-zinc-400';
+  const small = cn(fieldCls, 'h-8 w-full px-2 text-[13px]');
+  return (
+    <div className="mt-3 rounded-xl border border-zinc-200 bg-white p-3 md:ml-9 dark:border-zinc-700 dark:bg-zinc-900">
+      <input value={h.title} onChange={(e) => updateHabit(h.id, { title: e.target.value })} className={cn(fieldCls, 'mb-3 h-9 w-full px-3')} aria-label="반복 할 일 이름" />
+      <span className={lbl}>반복</span>
+      <DayPicker value={h.weekdays} onChange={(v) => updateHabit(h.id, { weekdays: v })} />
+      <div className="mt-3 grid grid-cols-3 gap-3">
+        <label className="block">
+          <span className={lbl}>범주</span>
+          <select value={h.area_id} onChange={(e) => updateHabit(h.id, { area_id: e.target.value })} className={small}>
+            {areaList.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
+          <span className={lbl}>시각</span>
+          <input type="time" value={h.time ?? ''} onChange={(e) => updateHabit(h.id, { time: e.target.value })} className={small} />
+        </label>
+        <label className="block">
+          <span className={lbl}>예상 시간</span>
+          <select value={h.estimate ?? 0} onChange={(e) => updateHabit(h.id, { estimate: Number(e.target.value) })} className={small}>
+            {(ESTIMATES.includes(h.estimate ?? 0) ? ESTIMATES : [...ESTIMATES, h.estimate ?? 0].sort((a, b) => a - b)).map((m) => (
+              <option key={m} value={m}>
+                {m ? fmtDur(m) : '모름'}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <div className="mt-3 flex items-center gap-2 border-t border-zinc-100 pt-3 text-xs text-zinc-400 dark:border-zinc-800">
+        <span>체크 기록·연속 기록은 그대로 남아요</span>
+        <button
+          onClick={() => {
+            updateHabit(h.id, { archived: true });
+            onClose();
+          }}
+          className="ml-auto rounded-lg px-2 py-1 text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-500/10"
+        >
+          반복 그만두기
+        </button>
+        <button onClick={onClose} className="rounded-lg px-2 py-1 font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800">
+          닫기
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 반복 요일 고르기: [매일] [평일] [월][화]…[일]
+ * value = [] 이면 매일
+ */
+export function DayPicker({ value, onChange }: { value: number[]; onChange: (v: number[]) => void }) {
+  const isDaily = value.length === 0;
+  const isWeekdays = value.join('') === '01234';
+  const chip = (active: boolean) =>
+    cn(
+      'h-7 shrink-0 rounded-full px-2.5 text-xs font-medium transition',
+      active ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900' : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300',
+    );
+  const toggle = (d: number) => {
+    const set = new Set(isDaily ? [] : value);
+    if (set.has(d)) set.delete(d);
+    else set.add(d);
+    const next = [...set].sort((a, b) => a - b);
+    onChange(next.length === 7 ? [] : next);
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      <button type="button" className={chip(isDaily)} onClick={() => onChange([])}>
+        매일
+      </button>
+      <button type="button" className={chip(isWeekdays)} onClick={() => onChange([0, 1, 2, 3, 4])}>
+        평일
+      </button>
+      <span className="mx-0.5 h-4 w-px bg-zinc-200 dark:bg-zinc-700" />
+      {DAY_LABELS.map((d, i) => (
+        <button key={d} type="button" className={cn(chip(!isDaily && value.includes(i)), 'w-7 px-0')} onClick={() => toggle(i)}>
+          {d}
+        </button>
+      ))}
     </div>
   );
 }
@@ -243,6 +372,7 @@ function TaskEditor({ task: t, today, tracked, onClose }: { task: Task; today: s
   const projects = useActiveProjects();
   const projectMap = useProjectMap();
   const areaList = useAreas();
+  const dailyId = useDailyId();
   const lbl = 'mb-1 block text-[11px] font-medium text-zinc-400';
   const small = cn(fieldCls, 'h-8 w-full px-2 text-[13px]');
   const quick = (label: string, active: boolean, onClick: () => void) => (
@@ -266,7 +396,7 @@ function TaskEditor({ task: t, today, tracked, onClose }: { task: Task; today: s
           <span className={lbl}>분류</span>
           {/* 값: "p:<프로젝트>" 또는 "a:<범주>" (프로젝트 없이 범주만) */}
           <select
-            value={t.project_id ? `p:${t.project_id}` : `a:${t.area_id || DAILY_AREA}`}
+            value={t.project_id ? `p:${t.project_id}` : `a:${!t.area_id || t.area_id === DAILY_AREA ? dailyId : t.area_id}`}
             onChange={(e) => {
               const [k, id] = [e.target.value.slice(0, 1), e.target.value.slice(2)];
               updateTask(t.id, k === 'p' ? { project_id: id } : { project_id: '', area_id: id });
@@ -338,6 +468,7 @@ function TaskEditor({ task: t, today, tracked, onClose }: { task: Task; today: s
           </button>
         </div>
       </div>
+      <RepeatConvert task={t} onDone={onClose} />
       <div className="mt-3 flex items-center gap-2 border-t border-zinc-100 pt-3 text-xs text-zinc-400 dark:border-zinc-800">
         {tracked > 0 ? <span>지금까지 {fmtDur(tracked)} 기록</span> : <span>▶ 를 누르면 시간이 기록돼요</span>}
         <button onClick={() => deleteTask(t.id)} className="ml-auto flex items-center gap-1 rounded-lg px-2 py-1 text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-500/10">
@@ -357,6 +488,7 @@ export function HabitRow({ habit: h, date, logs, streakDays }: { habit: Habit; d
   const area = areas[h.area_id];
   const done = logs.has(logId(h.id, date));
   const isRunning = running?.habit_id === h.id;
+  const [open, setOpen] = useState(false);
   const fire = streakDays > 0 && (
     <span className="inline-flex items-center gap-0.5 text-[13px] font-semibold text-orange-500 tabular-nums">
       <Flame className="size-3.5" />
@@ -368,14 +500,16 @@ export function HabitRow({ habit: h, date, logs, streakDays }: { habit: Habit; d
       <div className={cn('flex items-start gap-3', GRID)}>
         <CheckButton done={done} color={area?.color} onClick={() => toggleHabit(h.id, date)} label={done ? '완료 취소' : '완료'} />
         <div className="min-w-0 flex-1">
-          <span className={cn('text-[15px] leading-snug break-words', done && 'text-zinc-400 line-through decoration-zinc-300 dark:decoration-zinc-600')}>
-            {h.time && <b className="mr-1.5 font-semibold text-indigo-600 tabular-nums dark:text-indigo-400">{h.time}</b>}
-            {h.title}
-          </span>
-          <span className="ml-2 inline-flex items-center gap-0.5 text-[11px] font-medium text-zinc-400">
-            <Repeat className="size-3" />
-            {repeatLabel(h.weekdays)}
-          </span>
+          <button onClick={() => setOpen(!open)} className="min-w-0 text-left">
+            <span className={cn('text-[15px] leading-snug break-words', done && 'text-zinc-400 line-through decoration-zinc-300 dark:decoration-zinc-600')}>
+              {h.time && <b className="mr-1.5 font-semibold text-indigo-600 tabular-nums dark:text-indigo-400">{h.time}</b>}
+              {h.title}
+            </span>
+            <span className="ml-2 inline-flex items-center gap-0.5 text-[11px] font-medium text-zinc-400">
+              <Repeat className="size-3" />
+              {repeatLabel(h.weekdays)}
+            </span>
+          </button>
           <MobileMeta>
             <Chip name={area?.name} color={area?.color} />
             {!!h.estimate && <EstimateText estimate={h.estimate} tracked={0} />}
@@ -393,6 +527,7 @@ export function HabitRow({ habit: h, date, logs, streakDays }: { habit: Habit; d
           <PlayButton running={isRunning} onStart={() => timerForHabit(h)} />
         </div>
       </div>
+      {open && <HabitEditorInline habit={h} onClose={() => setOpen(false)} />}
     </li>
   );
 }
@@ -458,12 +593,15 @@ export function SteadyRow({ project: p, today, weekMinutes }: { project: Project
 export function QuickAdd({ defaultDate, projectId, placeholder }: { defaultDate?: string; projectId?: string; placeholder?: string }) {
   const [text, setText] = useState('');
   const [made, setMade] = useState<string | null>(null);
+  // 🔁 버튼: null = 반복 아님, [] = 매일, [0,2,4] = 월수금 …
+  const [repeat, setRepeat] = useState<number[] | null>(null);
   const projects = useActiveProjects();
   const projectMap = useProjectMap();
   const areaList = useAreas();
   const areaMap = useAreaMap();
   const today = useToday();
   const parsed = text.trim() ? parseTask(text, projects, today, areaList) : null;
+  if (parsed && repeat) parsed.repeat = repeat;
   const pid = parsed?.project_id ?? projectId;
   const chips: string[] = [];
   if (parsed) {
@@ -484,19 +622,43 @@ export function QuickAdd({ defaultDate, projectId, placeholder }: { defaultDate?
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        const r = addTaskFromText(text, { defaultDate, projectId });
+        const r = addTaskFromText(text, { defaultDate, projectId, repeat: repeat ?? undefined });
         if (!r) return;
         setText('');
-        setMade(r.kind === 'habit' ? '반복 할 일로 만들었어요 — 설정에서 고칠 수 있어요' : null);
-        if (r.kind === 'habit') setTimeout(() => setMade(null), 3000);
+        setRepeat(null);
+        setMade(r.kind === 'habit' ? '반복 할 일로 만들었어요 — 정한 요일마다 ①에 떠요. 눌러서 고칠 수 있어요' : null);
+        if (r.kind === 'habit') setTimeout(() => setMade(null), 3500);
       }}
     >
-      <input
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        placeholder={placeholder ?? '할 일 추가 — 예: 자소서 제출 #취업준비 내일 1h !'}
-        className={cn(fieldCls, 'h-11 w-full min-w-0 rounded-xl px-4 text-[15px] shadow-[0_1px_2px_rgba(0,0,0,0.03)]')}
-      />
+      <div className="flex gap-2">
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder={placeholder ?? (repeat ? '반복할 일 — 예: 일기 22:00 20분' : '할 일 추가 — 예: 자소서 제출 #취업준비 내일 1h !')}
+          className={cn(fieldCls, 'h-11 w-full min-w-0 flex-1 rounded-xl px-4 text-[15px] shadow-[0_1px_2px_rgba(0,0,0,0.03)]')}
+        />
+        <button
+          type="button"
+          onClick={() => setRepeat(repeat ? null : [])}
+          aria-pressed={!!repeat}
+          title="반복 할 일로 추가"
+          className={cn(
+            'flex h-11 shrink-0 items-center gap-1 rounded-xl border px-3 text-sm font-medium transition',
+            repeat
+              ? 'border-transparent bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
+              : 'border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300',
+          )}
+        >
+          <Repeat className="size-4" />
+          <span className="hidden sm:inline">반복</span>
+        </button>
+      </div>
+      {repeat && (
+        <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl bg-zinc-50 px-3 py-2 dark:bg-zinc-800/50">
+          <span className="text-xs font-semibold text-zinc-500">반복</span>
+          <DayPicker value={repeat} onChange={setRepeat} />
+        </div>
+      )}
       <div className="mt-1.5 flex min-h-5 min-w-0 flex-wrap gap-1.5 px-1 text-[11px] text-zinc-500">
         {parsed ? (
           chips.map((c) => (

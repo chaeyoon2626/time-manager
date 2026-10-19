@@ -4,7 +4,7 @@ import { logId, reviewId, uid } from './lib/ids';
 import { parseTask } from './lib/parse';
 import type { Area, BucketItem, BucketKind, Habit, Milestone, PlanSlot, Project, ProjectKind, Review, ReviewLevel, Session, Task } from './lib/types';
 import { TABLES } from './lib/types';
-import { patchRow, putRows, useStore, type Settings } from './store';
+import { patchRow, putRows, userDailyArea, useStore, type Settings } from './store';
 
 const data = () => useStore.getState().data;
 
@@ -30,9 +30,16 @@ export const updateHabit = (id: string, patch: Partial<Habit>) => patchRow('habi
 const activeProjects = () => Object.values(data().projects).filter((p) => !p.deleted && !p.done);
 const activeAreas = () => Object.values(data().areas).filter((a) => !a.deleted);
 
+/** 기본 "일상" 범주 id — 사용자가 직접 만든 일상이 있으면 그쪽 */
+export function dailyId() {
+  const areas = data().areas;
+  if (areas[DAILY_AREA] && !areas[DAILY_AREA].deleted) return DAILY_AREA;
+  return userDailyArea(areas)?.id ?? DAILY_AREA;
+}
+
 /** 프로젝트 없는 할 일의 범주 (없으면 일상) */
 export const taskArea = (t: Pick<Task, 'project_id' | 'area_id'>) =>
-  data().projects[t.project_id]?.area_id ?? (t.area_id || DAILY_AREA);
+  data().projects[t.project_id]?.area_id ?? (t.area_id && t.area_id !== 'daily' ? t.area_id : dailyId());
 
 /**
  * 한 줄 입력으로 할 일 추가.
@@ -42,12 +49,13 @@ export const taskArea = (t: Pick<Task, 'project_id' | 'area_id'>) =>
  */
 export function addTaskFromText(
   text: string,
-  opts: { defaultDate?: string; projectId?: string } = {},
+  opts: { defaultDate?: string; projectId?: string; repeat?: number[] } = {},
 ): { kind: 'task' | 'habit'; id: string } | null {
   const p = parseTask(text, activeProjects(), todayKey(), activeAreas());
   if (!p.title) return null;
+  if (opts.repeat) p.repeat = opts.repeat; // 입력칸 옆 🔁 버튼으로 고른 반복
   const project_id = p.project_id ?? opts.projectId ?? '';
-  const area_id = data().projects[project_id]?.area_id ?? p.area_id ?? DAILY_AREA;
+  const area_id = data().projects[project_id]?.area_id ?? p.area_id ?? dailyId();
 
   if (p.repeat) {
     return { kind: 'habit', id: addHabit(p.title, area_id, p.repeat, p.time ?? '', p.estimate ?? 0) };
@@ -69,6 +77,17 @@ export function addTaskFromText(
   };
   putRows('tasks', [task]);
   return { kind: 'task', id: task.id };
+}
+
+/**
+ * 이미 적어둔 할 일을 반복 할 일로 바꾼다 (이름·범주·시각·예상 시간을 그대로 가져감).
+ * 오늘 이미 끝낸 할 일이면 오늘 체크도 옮긴다. 원래 할 일은 지운다.
+ */
+export function convertTaskToHabit(t: Task, weekdays: number[]) {
+  const id = addHabit(t.title, taskArea(t), weekdays, t.time, t.estimate);
+  if (t.done && t.done_on === todayKey()) toggleHabit(id, todayKey());
+  deleteTask(t.id);
+  return id;
 }
 
 export const updateTask = (id: string, patch: Partial<Task>) => patchRow('tasks', id, patch);
@@ -291,7 +310,7 @@ export function addBucket(title: string, minutes: number, area_id: string, kind:
 
 /** 하고 싶은 것 → 프로젝트·꾸준히로 올리기. 메모는 그대로 옮기고, 원래 항목은 "올림"으로 끝낸다 */
 export function promoteIdea(b: BucketItem, kind: ProjectKind) {
-  const id = addProject(b.title, b.area_id || DAILY_AREA, kind);
+  const id = addProject(b.title, b.area_id || dailyId(), kind);
   if (b.note) updateProject(id, { note: b.note });
   updateBucket(b.id, { done: true, done_on: todayKey() });
   return id;
@@ -307,7 +326,7 @@ export const toggleBucket = (b: BucketItem) =>
 export const bucketToToday = (b: BucketItem) =>
   putRows('tasks', [
     {
-      id: uid(), title: b.title, project_id: '', area_id: b.area_id || DAILY_AREA, date: todayKey(), due: todayKey(),
+      id: uid(), title: b.title, project_id: '', area_id: b.area_id || dailyId(), date: todayKey(), due: todayKey(),
       time: '', estimate: b.minutes, important: false, done: false, done_on: '', sort: Date.now(),
     },
   ]);

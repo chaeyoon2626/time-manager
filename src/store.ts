@@ -94,11 +94,48 @@ function migrateV3(p: Persisted): Persisted {
   return { ...p, data: { ...data, tasks, sessions } as Tables, dirty };
 }
 
+/** 사용자가 직접 만든 "일상" 범주 (기본 'daily'와 다른 것) */
+export const userDailyArea = (areas: Tables['areas']) =>
+  Object.values(areas).find((a) => !a.deleted && a.id !== 'daily' && a.name.trim() === '일상');
+
 // 기본 영역은 EPOCH 시각으로 넣어서, 다른 기기에서 고친 값이 항상 이기게 한다
 function withDefaults(data: Tables): Tables {
   const areas = { ...data.areas };
-  for (const a of DEFAULT_AREAS) if (!areas[a.id]) areas[a.id] = { ...a, updated_at: EPOCH, deleted: false };
+  for (const a of DEFAULT_AREAS) {
+    if (areas[a.id]) continue;
+    // 이미 직접 만든 "일상"이 있으면 기본 일상은 만들지 않는다
+    if (a.id === 'daily' && userDailyArea(areas)) continue;
+    areas[a.id] = { ...a, updated_at: EPOCH, deleted: false };
+  }
   return { ...data, areas };
+}
+
+/**
+ * v5: v4에서 기본 범주 "일상"(id 'daily')을 만들었는데, 사용자가 이미 "일상"을 만들어 둔 경우가 있었다.
+ * → 기본 일상에 들어간 것을 전부 사용자의 일상으로 옮기고 기본 일상은 지운다.
+ */
+function migrateV5(p: Persisted): Persisted {
+  const target = userDailyArea(p.data.areas);
+  if (!target) return p;
+  const now = new Date().toISOString();
+  const data = { ...p.data };
+  const dirty = { ...p.dirty };
+  const repoint = <T extends 'tasks' | 'habits' | 'sessions' | 'projects' | 'bucket_items'>(t: T) => {
+    const next = { ...data[t] } as Record<string, Tables[T][string]>;
+    for (const [id, row] of Object.entries(next)) {
+      if ((row as { area_id?: string }).area_id === 'daily') {
+        next[id] = { ...row, area_id: target.id, updated_at: now };
+        dirty[`${t}:${id}`] = true;
+      }
+    }
+    (data as Record<string, unknown>)[t] = next;
+  };
+  (['tasks', 'habits', 'sessions', 'projects', 'bucket_items'] as const).forEach(repoint);
+  if (data.areas.daily) {
+    data.areas = { ...data.areas, daily: { ...data.areas.daily, deleted: true, updated_at: now } };
+    dirty['areas:daily'] = true;
+  }
+  return { ...p, data, dirty };
 }
 
 /**
@@ -189,13 +226,14 @@ export const useStore = create<State>()(
     }),
     {
       name: 'focus-planner',
-      version: 4,
+      version: 5,
       migrate: (persisted, version) => {
         let p = persisted as Persisted;
         if (!p?.data) return p;
         if (version < 2) p = { ...p, data: migrateAreasV2(p.data) };
         if (version < 3) p = migrateV3(p);
         if (version < 4) p = migrateV4(p);
+        if (version < 5) p = migrateV5(p);
         return p;
       },
       storage,
