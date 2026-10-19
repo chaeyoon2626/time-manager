@@ -148,6 +148,21 @@ export function addSubarea(project_id: string, name: string, opts: Partial<Subar
 
 export const updateSubarea = (id: string, patch: Partial<Subarea>) => patchRow('subareas', id, patch);
 
+/**
+ * 세부 영역 삭제: 아직 안 한 오늘·앞으로의 그날 할 일도 같이 지운다.
+ * 이미 끝낸 할 일과 잰 시간은 기록으로 남긴다.
+ */
+export function deleteSubarea(sa: Subarea) {
+  const today = todayKey();
+  putRows(
+    'tasks',
+    Object.values(data().tasks)
+      .filter((t) => !t.deleted && !t.done && t.subarea_id === sa.id && t.routine && t.date >= today)
+      .map((t) => ({ ...t, deleted: true })),
+  );
+  patchRow('subareas', sa.id, { deleted: true });
+}
+
 /** 그날이 이 세부 영역을 하는 날인지 */
 export const subareaDue = (sa: Subarea, date: string) =>
   !sa.deleted && !sa.archived && sa.cadence === 'days' && date >= sa.created_on &&

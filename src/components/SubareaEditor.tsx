@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
-import { Archive, ChevronDown, Layers, Plus } from 'lucide-react';
-import { addSubarea, ensureRoutineTasks, subareaDue, updateSubarea } from '../actions';
+import { Archive, ChevronDown, Layers, Plus, Trash2 } from 'lucide-react';
+import { addSubarea, deleteSubarea, ensureRoutineTasks, subareaDue, updateSubarea } from '../actions';
 import { useNow, useSessions, useToday } from '../hooks';
 import { addDays, fmtDur, fromKey, weekDays, weekStart } from '../lib/date';
 import { overlapMin } from '../lib/stats';
@@ -79,7 +79,7 @@ export function SubareaSection({ p }: { p: Project }) {
               <button onClick={() => setOpenId(open ? null : sa.id)} className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-baseline gap-x-2">
-                    <span className="text-[15px] font-medium">{sa.name}</span>
+                    <span className="text-[15px] font-medium">{sa.name || <span className="text-zinc-400">(이름 없음)</span>}</span>
                     <span className="text-xs text-zinc-400">
                       {cadenceLabel(sa)} · {sa.mode === 'fixed' ? `고정: ${sa.fixed_title || sa.name}` : '그날 정하기'}
                       {sa.estimate > 0 && ` · ${fmtDur(sa.estimate)}`}
@@ -130,10 +130,13 @@ export function SubareaSection({ p }: { p: Project }) {
           <ul className="mt-1 space-y-1 text-sm">
             {archived.map((sa) => (
               <li key={sa.id} className="flex items-center gap-2 text-zinc-500">
-                {sa.name}
+                {sa.name || '(이름 없음)'}
                 <button onClick={() => updateSubarea(sa.id, { archived: false })} className="text-xs underline">
                   되살리기
                 </button>
+                <span className="ml-auto">
+                  <DeleteButton sa={sa} />
+                </span>
               </li>
             ))}
           </ul>
@@ -205,12 +208,28 @@ function SubareaForm({ sa }: { sa: Subarea }) {
           <span className={lbl}>시각</span>
           <input type="time" value={sa.time} onChange={(e) => updateSubarea(sa.id, { time: e.target.value })} className={small} />
         </label>
-        <div className="flex items-end justify-end">
-          <Button className="h-8 text-xs text-zinc-500" onClick={() => updateSubarea(sa.id, { archived: true })}>
-            <Archive className="size-3.5" /> 보관
-          </Button>
-        </div>
+      </div>
+      <div className="flex items-center justify-end gap-1 border-t border-zinc-100 pt-2.5 dark:border-zinc-800">
+        <Button className="h-8 text-xs text-zinc-500" title="목록에서 숨기기 (되살릴 수 있어요)" onClick={() => updateSubarea(sa.id, { archived: true })}>
+          <Archive className="size-3.5" /> 보관
+        </Button>
+        <DeleteButton sa={sa} />
       </div>
     </div>
+  );
+}
+
+function DeleteButton({ sa }: { sa: Subarea }) {
+  return (
+    <Button
+      variant="danger"
+      className="h-8 text-xs"
+      onClick={() =>
+        confirm(`세부 영역 '${sa.name || '(이름 없음)'}'을(를) 지울까요?\n아직 안 한 오늘·앞으로의 할 일도 같이 지워져요. 끝낸 할 일과 잰 시간은 남아요.`) &&
+        deleteSubarea(sa)
+      }
+    >
+      <Trash2 className="size-3.5" /> 삭제
+    </Button>
   );
 }
