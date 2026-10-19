@@ -1,12 +1,12 @@
 import { useMemo, useState } from 'react';
-import { ArrowLeft, Check, Play, Plus, Square, Trash2 } from 'lucide-react';
-import { addProject, deleteProject, setTarget, stopTimer, timerForProject, toggleProjectDone, updateProject } from '../actions';
+import { ArrowLeft, Check, Combine, Play, Plus, Repeat, Square, Trash2 } from 'lucide-react';
+import { addProject, deleteProject, mergeIntoArea, sameNamedArea, setTarget, stopTimer, timerForProject, toggleProjectDone, updateProject } from '../actions';
 import { Outcomes } from '../components/Outcomes';
-import { ListHeader, QuickAdd, TaskRow, useTrackedByTask } from '../components/TaskList';
+import { HabitRow, ListHeader, QuickAdd, TaskRow, useTrackedByTask } from '../components/TaskList';
 import { Button, Card, cn, fieldCls } from '../components/ui';
-import { useAlive, useAreaMap, useAreas, useNow, useRunning, useSessions, useToday } from '../hooks';
+import { useAlive, useAreaMap, useAreas, useLogSet, useNow, useRunning, useSessions, useToday } from '../hooks';
 import { addDays, dDay, diffDays, fmtDur, fmtShort, fromKey, weekStart } from '../lib/date';
-import { effectiveDue, overlapMin, sumSessions, targetFor } from '../lib/stats';
+import { effectiveDue, overlapMin, streak, sumSessions, targetFor } from '../lib/stats';
 import type { Project, ProjectKind, Task } from '../lib/types';
 import { useStore } from '../store';
 
@@ -269,6 +269,30 @@ function DetailHeader({ p, children }: { p: Project; children?: React.ReactNode 
         className="field-sizing-content mt-1 min-h-20 w-full basis-full resize-y rounded-xl border border-amber-200/70 bg-amber-50/50 px-3.5 py-3 text-sm leading-relaxed whitespace-pre-wrap placeholder:text-zinc-400 focus:border-amber-300 focus:bg-amber-50 focus:outline-none dark:border-amber-500/20 dark:bg-amber-500/[0.05] dark:focus:bg-amber-500/10"
         aria-label="메모"
       />
+      <MergeBanner p={p} />
+    </div>
+  );
+}
+
+/** 범주와 이름이 같은 꾸준히·프로젝트(예: 꾸준히 "운동" ↔ 범주 "운동")면 범주로 합치기를 권한다 */
+function MergeBanner({ p }: { p: Project }) {
+  const area = sameNamedArea(p);
+  if (!area) return null;
+  const hasOutcomes = (p.milestones ?? []).length > 0 || !!p.current || !!p.note;
+  return (
+    <div className="basis-full rounded-xl border border-sky-200 bg-sky-50 px-3.5 py-3 text-sm dark:border-sky-500/30 dark:bg-sky-500/10">
+      <p className="text-sky-900 dark:text-sky-200">
+        범주 <b>{area.name}</b>와(과) 이름이 같아서 목록에 두 번 보여요. 범주로 합치면 이 {p.kind === 'project' ? '프로젝트' : '꾸준히'}의 할 일·반복·기록이
+        전부 범주 {area.name}(으)로 옮겨지고{(p.targets ?? []).length > 0 ? ', 주간 목표 시간도 범주로 옮겨요' : ''}.
+      </p>
+      {hasOutcomes && <p className="mt-1 text-xs text-sky-700 dark:text-sky-300">메모·성과 목표는 범주에 없어서 합치면 사라져요. 필요하면 먼저 옮겨 적어 두세요.</p>}
+      <Button
+        variant="outline"
+        className="mt-2"
+        onClick={() => confirm(`'${p.title}'을(를) 범주 '${area.name}'(으)로 합칠까요?`) && (mergeIntoArea(p, area), (location.hash = 'projects'))}
+      >
+        <Combine className="size-4" /> 범주 {area.name}(으)로 합치기
+      </Button>
     </div>
   );
 }
@@ -328,10 +352,33 @@ function ProjectTasks({
   placeholder: string;
 }) {
   const today = useToday();
+  const habitsRec = useStore((s) => s.data.habits);
+  const logs = useLogSet();
+  // 이 프로젝트·꾸준히 안의 반복 할 일 — 정한 요일마다 오늘 목록 ①에 자동으로 뜬다
+  const repeats = Object.values(habitsRec)
+    .filter((h) => !h.deleted && !h.archived && h.project_id === p.id)
+    .sort((a, b) => a.sort - b.sort);
   return (
     <div className="mt-5">
       <h3 className="mb-2 text-sm font-bold">할 일</h3>
-      <QuickAdd defaultDate="" projectId={p.id} placeholder={`'${p.title}'에 할 일 추가 — ${placeholder}`} />
+      <QuickAdd projectId={p.id} placeholder={`'${p.title}'에 할 일 추가 — ${placeholder}`} />
+      <div className="mt-3">
+        <div className="mb-1 flex items-baseline gap-2 px-1">
+          <Repeat className="size-3.5 text-zinc-400" />
+          <h4 className="text-[13px] font-semibold">반복</h4>
+          <span className="text-[11px] text-zinc-400">정한 요일마다 오늘 할 일에 자동으로 떠요 · 위 입력칸의 🔁로 추가</span>
+        </div>
+        {repeats.length > 0 ? (
+          <ul>
+            {repeats.map((h) => (
+              <HabitRow key={h.id} habit={h} date={today} logs={logs} streakDays={streak(h, logs, today)} />
+            ))}
+          </ul>
+        ) : (
+          <p className="px-3 py-2 text-xs text-zinc-400">아직 없어요. 예: 단어 50개 · 매일, 듣기 모의고사 · 화목</p>
+        )}
+      </div>
+      <h4 className="mt-4 mb-1 px-1 text-[13px] font-semibold">한 번 하는 일</h4>
       <div className="mt-2">
         <ListHeader />
         <ul>

@@ -2,7 +2,7 @@ import { atTime, todayKey, weekStart } from './lib/date';
 import { DAILY_AREA } from './lib/defaults';
 import { logId, reviewId, uid } from './lib/ids';
 import { parseTask } from './lib/parse';
-import type { Area, BucketItem, BucketKind, Habit, Milestone, PlanSlot, Project, ProjectKind, Review, ReviewLevel, Session, Task } from './lib/types';
+import type { Area, BucketItem, BucketKind, Habit, Milestone, PlanSlot, Project, ProjectKind, Review, ReviewLevel, Session, Target, Task } from './lib/types';
 import { TABLES } from './lib/types';
 import { patchRow, putRows, userDailyArea, useStore, type Settings } from './store';
 
@@ -16,9 +16,9 @@ export function toggleHabit(habitId: string, date: string) {
   putRows('habit_logs', [{ id, habit_id: habitId, date, deleted: cur ? !cur.deleted : false }]);
 }
 
-export function addHabit(title: string, area_id: string, weekdays: number[] = [], time = '', estimate = 0) {
+export function addHabit(title: string, area_id: string, weekdays: number[] = [], time = '', estimate = 0, project_id = '') {
   const id = uid();
-  putRows('habits', [{ id, title, area_id, weekdays, time, estimate, sort: Date.now(), archived: false, created_on: todayKey() }]);
+  putRows('habits', [{ id, title, area_id, project_id, weekdays, time, estimate, sort: Date.now(), archived: false, created_on: todayKey() }]);
   return id;
 }
 
@@ -58,7 +58,7 @@ export function addTaskFromText(
   const area_id = data().projects[project_id]?.area_id ?? p.area_id ?? dailyId();
 
   if (p.repeat) {
-    return { kind: 'habit', id: addHabit(p.title, area_id, p.repeat, p.time ?? '', p.estimate ?? 0) };
+    return { kind: 'habit', id: addHabit(p.title, area_id, p.repeat, p.time ?? '', p.estimate ?? 0, project_id) };
   }
   const date = p.date ?? opts.defaultDate ?? todayKey();
   const task: Omit<Task, 'updated_at' | 'deleted'> = {
@@ -84,7 +84,7 @@ export function addTaskFromText(
  * 오늘 이미 끝낸 할 일이면 오늘 체크도 옮긴다. 원래 할 일은 지운다.
  */
 export function convertTaskToHabit(t: Task, weekdays: number[]) {
-  const id = addHabit(t.title, taskArea(t), weekdays, t.time, t.estimate);
+  const id = addHabit(t.title, taskArea(t), weekdays, t.time, t.estimate, t.project_id);
   if (t.done && t.done_on === todayKey()) toggleHabit(id, todayKey());
   deleteTask(t.id);
   return id;
@@ -154,13 +154,56 @@ export function toggleMilestone(p: Project, m: Milestone) {
 export const deleteMilestone = (p: Project, id: string) =>
   updateProject(p.id, { milestones: (p.milestones ?? []).filter((m) => m.id !== id) });
 
-/** 꾸준히 목표 변경: 이번 주부터 적용. 이전 목표는 기록으로 남는다 */
-export function setTarget(p: Project, hours: number) {
+/** 이번 주부터 적용되는 주간 목표로 바꾼 목록. 이전 목표는 기록으로 남는다 */
+function withTarget(targets: Target[] | undefined, hours: number) {
   const from = weekStart(todayKey());
-  const targets = (p.targets ?? []).filter((t) => t.from !== from);
-  targets.push({ from, hours });
-  targets.sort((a, b) => a.from.localeCompare(b.from));
-  updateProject(p.id, { targets });
+  const next = (targets ?? []).filter((t) => t.from !== from);
+  next.push({ from, hours });
+  return next.sort((a, b) => a.from.localeCompare(b.from));
+}
+
+/** 꾸준히 주간 목표 변경 */
+export const setTarget = (p: Project, hours: number) => updateProject(p.id, { targets: withTarget(p.targets, hours) });
+
+/** 범주 주간 목표 변경 (예: 운동 주 4h) */
+export const setAreaTarget = (a: Area, hours: number) => updateArea(a.id, { targets: withTarget(a.targets, hours) });
+
+/** 꾸준히·프로젝트 이름과 똑같은 범주 (예: 꾸준히 "운동" ↔ 범주 "운동") */
+export const sameNamedArea = (p: Project) =>
+  Object.values(data().areas).find((a) => !a.deleted && a.name.trim() === p.title.trim());
+
+/**
+ * 이름이 같은 범주로 합치기: 이 꾸준히(프로젝트)의 할 일·기록·시간표 계획을 범주로 옮기고 꾸준히는 지운다.
+ * 주간 목표는 범주에 목표가 없을 때만 그대로 옮긴다.
+ */
+export function mergeIntoArea(p: Project, a: Area) {
+  const d = data();
+  putRows(
+    'tasks',
+    Object.values(d.tasks)
+      .filter((t) => !t.deleted && t.project_id === p.id)
+      .map((t) => ({ ...t, project_id: '', area_id: a.id })),
+  );
+  putRows(
+    'sessions',
+    Object.values(d.sessions)
+      .filter((s) => !s.deleted && s.project_id === p.id)
+      .map((s) => ({ ...s, project_id: '', area_id: a.id, title: s.title === p.title ? '' : s.title })),
+  );
+  putRows(
+    'plan_slots',
+    Object.values(d.plan_slots)
+      .filter((s) => !s.deleted && s.project_id === p.id)
+      .map((s) => ({ ...s, project_id: '' })),
+  );
+  putRows(
+    'habits',
+    Object.values(d.habits)
+      .filter((h) => !h.deleted && h.project_id === p.id)
+      .map((h) => ({ ...h, project_id: '', area_id: a.id })),
+  );
+  if ((p.targets ?? []).length && !(a.targets ?? []).length) updateArea(a.id, { targets: p.targets });
+  deleteProject(p.id);
 }
 
 // ---------- 타이머 ----------
@@ -213,7 +256,8 @@ export function timerForTask(t: Task) {
   startTimer({ task_id: t.id, project_id: t.project_id, area_id: taskArea(t), title: t.title });
 }
 export const timerForProject = (p: Project) => startTimer({ project_id: p.id, area_id: p.area_id, title: p.title });
-export const timerForHabit = (h: Habit) => startTimer({ habit_id: h.id, area_id: h.area_id, title: h.title });
+export const timerForHabit = (h: Habit) =>
+  startTimer({ habit_id: h.id, project_id: h.project_id ?? '', area_id: h.area_id, title: h.title });
 
 // ---------- 시간표 ----------
 

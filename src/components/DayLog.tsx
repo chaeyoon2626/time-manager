@@ -5,6 +5,7 @@ import { useActiveProjects, useAreaMap, useAreas, useNow, useProjectMap, useSess
 import { atTime, dayBounds, fmtDur, hhmm } from '../lib/date';
 import { overlapMin, sumSessions } from '../lib/stats';
 import type { Habit, Session, Task } from '../lib/types';
+import { ClassifyOptions } from './TaskList';
 import { Button, Card, cn, fieldCls } from './ui';
 
 /** 그날 잰 시간: 범주별 합계 + 기록 목록(고치기·지우기) + 깜빡한 기록 추가 */
@@ -134,7 +135,7 @@ function AddSession({ date, tasks, habits, onDone }: { date: string; tasks: Task
     const pt: PlanTarget = t
       ? { task_id: t.id, habit_id: '', project_id: t.project_id, title: t.title }
       : h
-        ? { task_id: '', habit_id: h.id, project_id: '', title: h.title }
+        ? { task_id: '', habit_id: h.id, project_id: h.project_id ?? '', title: h.title }
         : { task_id: '', habit_id: '', project_id: p?.id ?? '', title: title.trim() || p?.title || '' };
     if (kind === 'a') {
       // 범주만 고른 경우: 범주를 직접 지정해서 남긴다
@@ -168,22 +169,7 @@ function AddSession({ date, tasks, habits, onDone }: { date: string; tasks: Task
             ))}
           </optgroup>
         )}
-        {projects.length > 0 && (
-          <optgroup label="프로젝트 · 꾸준히">
-            {projects.map((p) => (
-              <option key={p.id} value={`p:${p.id}`}>
-                {p.title}
-              </option>
-            ))}
-          </optgroup>
-        )}
-        <optgroup label="범주만">
-          {areas.map((a) => (
-            <option key={a.id} value={`a:${a.id}`}>
-              {a.name}
-            </option>
-          ))}
-        </optgroup>
+        <ClassifyOptions />
       </select>
       {(kind === 'p' || kind === 'a') && (
         <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="무엇을 했나요 (선택)" className={cn(sel, 'w-full')} />

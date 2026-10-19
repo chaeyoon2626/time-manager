@@ -4,6 +4,7 @@ import {
   addArea,
   addHabit,
   deleteArea,
+  setAreaTarget,
   exportData,
   importData,
   updateArea,
@@ -12,7 +13,8 @@ import {
 } from '../actions';
 import { Button, Card, Switch, cn, fieldCls, inputCls } from '../components/ui';
 import { useAreas, useHabits } from '../hooks';
-import { DAY_LABELS, fmtDur } from '../lib/date';
+import { DAY_LABELS, fmtDur, todayKey, weekStart } from '../lib/date';
+import { targetFor } from '../lib/stats';
 import { AREA_PALETTE, RECOMMENDED_AREAS } from '../lib/defaults';
 import { supabase } from '../lib/supabase';
 import type { Habit } from '../lib/types';
@@ -139,7 +141,7 @@ function Areas() {
       <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
         {areas.map((a) => (
           <li key={a.id} className="py-3">
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
               <label className="relative size-7 shrink-0 cursor-pointer overflow-hidden rounded-full ring-1 ring-black/5" style={{ background: a.color }}>
                 <input
                   type="color"
@@ -149,8 +151,22 @@ function Areas() {
                   aria-label={`${a.name} 색`}
                 />
               </label>
-              <input value={a.name} onChange={(e) => updateArea(a.id, { name: e.target.value })} className={cn(fieldCls, 'h-8 w-full max-w-48 px-3')} aria-label="범주 이름" />
+              <input value={a.name} onChange={(e) => updateArea(a.id, { name: e.target.value })} className={cn(fieldCls, 'h-8 min-w-32 flex-1 px-3 sm:max-w-48 sm:flex-none')} aria-label="범주 이름" />
               <div className="ml-auto flex items-center gap-2 text-xs text-zinc-500">
+                <label className="flex items-center gap-1" title="범주 전체 주간 목표 시간 (0 = 없음)">
+                  주
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.5}
+                    value={targetFor(a, weekStart(todayKey())) || ''}
+                    placeholder="–"
+                    onChange={(e) => setAreaTarget(a, Number(e.target.value) || 0)}
+                    className={cn(fieldCls, 'h-8 w-14 px-1.5 text-center text-xs')}
+                    aria-label={`${a.name} 주간 목표 시간`}
+                  />
+                  h
+                </label>
                 필수
                 <Switch label={`${a.name} 필수`} checked={a.required} onChange={(v) => updateArea(a.id, { required: v })} />
                 <Button

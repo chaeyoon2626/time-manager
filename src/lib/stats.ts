@@ -48,8 +48,8 @@ export function sumSessions(sessions: Session[], from: number, to: number, now: 
 /** 할 일 자체 마감 → 없으면 프로젝트 마감 */
 export const effectiveDue = (t: Task, projects: Tables['projects']) => t.due || projects[t.project_id]?.due || '';
 
-/** 그 주(월요일 key)에 적용되는 꾸준히 목표 시간. 그 주 이전에 정한 목표가 없으면 0 */
-export function targetFor(p: Project, weekKey: string) {
+/** 그 주(월요일 key)에 적용되는 주간 목표 시간(꾸준히·범주 공통). 그 주 이전에 정한 목표가 없으면 0 */
+export function targetFor(p: { targets?: Project['targets'] }, weekKey: string) {
   let h = 0;
   for (const t of p.targets ?? []) if (t.from <= weekKey) h = t.hours;
   return h;

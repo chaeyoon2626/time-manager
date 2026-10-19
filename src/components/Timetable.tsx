@@ -51,7 +51,7 @@ export function Timetable({ date, tasks, habits }: { date: string; tasks: Task[]
       })),
       ...habits.map((h) => ({
         key: `h:${h.id}`,
-        target: { task_id: '', habit_id: h.id, project_id: '', title: h.title },
+        target: { task_id: '', habit_id: h.id, project_id: h.project_id ?? '', title: h.title },
         estimate: h.estimate ?? 0,
         color: areas[h.area_id]?.color ?? NONE,
         label: h.title,

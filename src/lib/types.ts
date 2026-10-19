@@ -1,7 +1,15 @@
 export type Base = { id: string; updated_at: string; deleted: boolean };
 
-/** 범주 (커리어·취미·공부·운동 + 직접 추가, 최대 9개) */
-export type Area = Base & { name: string; color: string; required: boolean; is_waste: boolean; sort: number };
+/** 범주 (커리어·취미·공부·운동·일상 + 직접 추가) */
+export type Area = Base & {
+  name: string;
+  color: string;
+  required: boolean;
+  is_waste: boolean;
+  sort: number;
+  /** 범주 전체에 거는 주간 목표 시간 (꾸준히와 같은 방식, 예: 운동 주 4h). 없으면 목표 없음 */
+  targets?: { from: string; hours: number }[];
+};
 
 /** 반복 할 일 (예전 이름: 습관) — 매일 또는 정한 요일마다 오늘 목록에 자동으로 뜬다 */
 export type Habit = Base & {
@@ -13,6 +21,7 @@ export type Habit = Base & {
   created_on: string;
   time?: string; // 'HH:MM' (예: 학원 19:00), '' = 없음
   estimate?: number; // 예상 시간(분)
+  project_id?: string; // 프로젝트·꾸준히 안의 반복 할 일 (예: 중국어 → 단어 50개 매일), '' = 범주만
 };
 export type HabitLog = Base & { habit_id: string; date: string };
 

@@ -5,6 +5,7 @@ import {
   addTaskFromText,
   convertTaskToHabit,
   deleteTask,
+  startTimer,
   stopTimer,
   timerForHabit,
   timerForProject,
@@ -20,7 +21,7 @@ import { DAILY_AREA } from '../lib/defaults';
 import { logId } from '../lib/ids';
 import { parseTask } from '../lib/parse';
 import { effectiveDue, overlapMin, targetFor } from '../lib/stats';
-import type { Habit, Project, Task } from '../lib/types';
+import type { Area, Habit, Project, Task } from '../lib/types';
 import { cn, fieldCls } from './ui';
 
 // ---------- 표 모양 ----------
@@ -53,6 +54,42 @@ export function SectionTitle({ n, title, right }: { n: number; title: string; ri
       <h2 className="text-[15px] font-bold tracking-tight">{title}</h2>
       {right && <span className="ml-auto text-xs text-zinc-400 tabular-nums">{right}</span>}
     </div>
+  );
+}
+
+/**
+ * 분류 고르기 목록: 범주별로 묶어서 [범주만] → 그 범주의 프로젝트 → 꾸준히 순서.
+ * 값: "a:<범주 id>" 또는 "p:<프로젝트·꾸준히 id>"
+ */
+export function ClassifyOptions({ extraProject }: { extraProject?: Project }) {
+  const areas = useAreas();
+  const active = useActiveProjects();
+  const projects = extraProject && !active.some((p) => p.id === extraProject.id) ? [extraProject, ...active] : active;
+  const inArea = (aid: string) =>
+    projects.filter((p) => p.area_id === aid).sort((x, y) => (x.kind === y.kind ? x.sort - y.sort : x.kind === 'project' ? -1 : 1));
+  const orphans = projects.filter((p) => !areas.some((a) => a.id === p.area_id));
+  return (
+    <>
+      {areas.map((a) => (
+        <optgroup key={a.id} label={a.name}>
+          <option value={`a:${a.id}`}>{a.name} (범주만)</option>
+          {inArea(a.id).map((p) => (
+            <option key={p.id} value={`p:${p.id}`}>
+              {p.title} · {p.kind === 'project' ? '프로젝트' : '꾸준히'}
+            </option>
+          ))}
+        </optgroup>
+      ))}
+      {orphans.length > 0 && (
+        <optgroup label="기타">
+          {orphans.map((p) => (
+            <option key={p.id} value={`p:${p.id}`}>
+              {p.title} · {p.kind === 'project' ? '프로젝트' : '꾸준히'}
+            </option>
+          ))}
+        </optgroup>
+      )}
+    </>
   );
 }
 
@@ -93,7 +130,7 @@ function RepeatConvert({ task, onDone }: { task: Task; onDone: () => void }) {
 
 /** 반복 할 일 편집 (오늘 목록에서 눌러서): 이름·요일·시각·예상 시간·범주, 반복 그만두기 */
 function HabitEditorInline({ habit: h, onClose }: { habit: Habit; onClose: () => void }) {
-  const areaList = useAreas();
+  const projectMap = useProjectMap();
   const lbl = 'mb-1 block text-[11px] font-medium text-zinc-400';
   const small = cn(fieldCls, 'h-8 w-full px-2 text-[13px]');
   return (
@@ -103,13 +140,16 @@ function HabitEditorInline({ habit: h, onClose }: { habit: Habit; onClose: () =>
       <DayPicker value={h.weekdays} onChange={(v) => updateHabit(h.id, { weekdays: v })} />
       <div className="mt-3 grid grid-cols-3 gap-3">
         <label className="block">
-          <span className={lbl}>범주</span>
-          <select value={h.area_id} onChange={(e) => updateHabit(h.id, { area_id: e.target.value })} className={small}>
-            {areaList.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-              </option>
-            ))}
+          <span className={lbl}>분류</span>
+          <select
+            value={h.project_id ? `p:${h.project_id}` : `a:${h.area_id}`}
+            onChange={(e) => {
+              const [k, id] = [e.target.value.slice(0, 1), e.target.value.slice(2)];
+              updateHabit(h.id, k === 'p' ? { project_id: id, area_id: projectMap[id]?.area_id ?? h.area_id } : { project_id: '', area_id: id });
+            }}
+            className={small}
+          >
+            <ClassifyOptions extraProject={h.project_id ? projectMap[h.project_id] : undefined} />
           </select>
         </label>
         <label className="block">
@@ -369,9 +409,7 @@ export function TaskRow({
 const ESTIMATES = [0, 15, 30, 45, 60, 90, 120, 180, 240];
 
 function TaskEditor({ task: t, today, tracked, onClose }: { task: Task; today: string; tracked: number; onClose: () => void }) {
-  const projects = useActiveProjects();
   const projectMap = useProjectMap();
-  const areaList = useAreas();
   const dailyId = useDailyId();
   const lbl = 'mb-1 block text-[11px] font-medium text-zinc-400';
   const small = cn(fieldCls, 'h-8 w-full px-2 text-[13px]');
@@ -384,10 +422,6 @@ function TaskEditor({ task: t, today, tracked, onClose }: { task: Task; today: s
       {label}
     </button>
   );
-  // 완료했거나 지금 프로젝트 목록에 없는 프로젝트도 고른 상태로 보이게
-  const current = projectMap[t.project_id];
-  const options = current && !projects.some((p) => p.id === current.id) ? [current, ...projects] : projects;
-
   return (
     <div className="mt-3 rounded-xl border border-zinc-200 bg-white p-3 md:ml-9 dark:border-zinc-700 dark:bg-zinc-900">
       <input value={t.title} onChange={(e) => updateTask(t.id, { title: e.target.value })} className={cn(fieldCls, 'mb-3 h-9 w-full px-3')} aria-label="할 일 이름" />
@@ -403,31 +437,7 @@ function TaskEditor({ task: t, today, tracked, onClose }: { task: Task; today: s
             }}
             className={small}
           >
-            <optgroup label="범주 (프로젝트 없이)">
-              {areaList.map((a) => (
-                <option key={a.id} value={`a:${a.id}`}>
-                  {a.name}
-                </option>
-              ))}
-            </optgroup>
-            {(
-              [
-                ['project', '프로젝트'],
-                ['steady', '꾸준히'],
-              ] as const
-            ).map(([kind, label]) =>
-              options.some((p) => p.kind === kind) ? (
-                <optgroup key={kind} label={label}>
-                  {options
-                    .filter((p) => p.kind === kind)
-                    .map((p) => (
-                      <option key={p.id} value={`p:${p.id}`}>
-                        {p.title}
-                      </option>
-                    ))}
-                </optgroup>
-              ) : null,
-            )}
+            <ClassifyOptions extraProject={projectMap[t.project_id]} />
           </select>
         </label>
         <div>
@@ -485,7 +495,11 @@ function TaskEditor({ task: t, today, tracked, onClose }: { task: Task; today: s
 export function HabitRow({ habit: h, date, logs, streakDays }: { habit: Habit; date: string; logs: Set<string>; streakDays: number }) {
   const areas = useAreaMap();
   const running = useRunning();
-  const area = areas[h.area_id];
+  const projects = useProjectMap();
+  const proj = h.project_id ? projects[h.project_id] : undefined;
+  const area = areas[proj?.area_id ?? h.area_id];
+  // 분류: 프로젝트·꾸준히 안의 반복이면 그 이름, 아니면 범주 이름
+  const label = proj ? proj.title : area?.name;
   const done = logs.has(logId(h.id, date));
   const isRunning = running?.habit_id === h.id;
   const [open, setOpen] = useState(false);
@@ -511,13 +525,13 @@ export function HabitRow({ habit: h, date, logs, streakDays }: { habit: Habit; d
             </span>
           </button>
           <MobileMeta>
-            <Chip name={area?.name} color={area?.color} />
+            <Chip name={label} color={area?.color} />
             {!!h.estimate && <EstimateText estimate={h.estimate} tracked={0} />}
             {fire}
           </MobileMeta>
         </div>
         <div className="hidden min-w-0 md:block">
-          <Chip name={area?.name} color={area?.color} />
+          <Chip name={label} color={area?.color} />
         </div>
         <div className="hidden md:block">
           <EstimateText estimate={h.estimate ?? 0} tracked={0} />
@@ -582,6 +596,46 @@ export function SteadyRow({ project: p, today, weekMinutes }: { project: Project
         <div className="hidden md:col-span-2 md:block">{progress}</div>
         <div className="flex shrink-0 justify-end">
           <PlayButton running={isRunning} onStart={() => timerForProject(p)} />
+        </div>
+      </div>
+    </li>
+  );
+}
+
+/** 범주 자체의 주간 목표 (예: 운동 주 4h) — 그 범주에 기록된 모든 시간이 쌓인다 */
+export function AreaTargetRow({ area: a, today, weekMinutes }: { area: Area; today: string; weekMinutes: number }) {
+  const running = useRunning();
+  const target = targetFor(a, weekStart(today)) * 60;
+  const isRunning = !!running && !running.project_id && !running.task_id && !running.habit_id && running.area_id === a.id;
+  const ratio = target ? Math.min(weekMinutes / target, 1) : 0;
+  const progress = (
+    <div className="flex min-w-0 items-center gap-2">
+      <div className="h-2 min-w-16 flex-1 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
+        <div className="h-full rounded-full transition-all" style={{ width: `${ratio * 100}%`, background: a.color }} />
+      </div>
+      <span className="text-[13px] whitespace-nowrap tabular-nums">
+        <b className="font-semibold">{fmtDur(weekMinutes)}</b>
+        <span className="text-zinc-400"> / {fmtDur(target)}</span>
+      </span>
+    </div>
+  );
+  return (
+    <li className={cn(rowCls, isRunning && 'bg-rose-50/70 ring-1 ring-rose-200 dark:bg-rose-500/10 dark:ring-rose-500/30')}>
+      <div className={cn('flex items-center gap-3', GRID)}>
+        <span className="grid size-[22px] shrink-0 place-items-center">
+          <span className="size-2.5 rounded-full" style={{ background: a.color }} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <span className="text-[15px] leading-snug">{a.name}</span>
+          <span className="ml-2 text-[11px] text-zinc-400">범주 전체</span>
+          <div className="mt-1.5 md:hidden">{progress}</div>
+        </div>
+        <div className="hidden min-w-0 md:block">
+          <Chip name={a.name} color={a.color} />
+        </div>
+        <div className="hidden md:col-span-2 md:block">{progress}</div>
+        <div className="flex shrink-0 justify-end">
+          <PlayButton running={isRunning} onStart={() => startTimer({ area_id: a.id, title: '' })} />
         </div>
       </div>
     </li>

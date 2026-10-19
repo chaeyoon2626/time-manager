@@ -156,6 +156,8 @@ create table if not exists public.plan_slots (
 -- 반복 할 일(예전 이름: 습관)의 시각·예상 시간
 alter table public.habits add column if not exists time     text not null default '';
 alter table public.habits add column if not exists estimate int  not null default 0;
+alter table public.habits add column if not exists project_id text not null default ''; -- 프로젝트·꾸준히 안의 반복
+alter table public.areas  add column if not exists targets  jsonb not null default '[]'; -- 범주 주간 목표
 
 -- 예전 버전의 칠하는 타임바 (지금은 읽기만, 기록은 sessions로 옮겨짐)
 create table if not exists public.time_blocks (

@@ -3,13 +3,13 @@ import { saveReview } from '../actions';
 import { DateNav } from '../components/DateNav';
 import { DayLog } from '../components/DayLog';
 import { Timetable } from '../components/Timetable';
-import { HabitRow, ListHeader, QuickAdd, SectionTitle, SteadyRow, TaskRow, useTrackedByTask } from '../components/TaskList';
+import { AreaTargetRow, HabitRow, ListHeader, QuickAdd, SectionTitle, SteadyRow, TaskRow, useTrackedByTask } from '../components/TaskList';
 import { Card, Stat, cn, textareaCls } from '../components/ui';
-import { useActiveProjects, useAreaMap, useHabits, useLogSet, useNow, useProjectMap, useSessions, useToday } from '../hooks';
+import { useActiveProjects, useAreaMap, useAreas, useHabits, useLogSet, useNow, useProjectMap, useSessions, useToday } from '../hooks';
 import { addDays, DAY_LABELS, dayBounds, diffDays, fmtDur, fmtShort, fromKey, weekdayIdx, weekStart } from '../lib/date';
 import { DAILY_AREA } from '../lib/defaults';
 import { logId, reviewId } from '../lib/ids';
-import { effectiveDue, isScheduled, streak, sumSessions } from '../lib/stats';
+import { effectiveDue, isScheduled, streak, sumSessions, targetFor } from '../lib/stats';
 import type { Tables, Task } from '../lib/types';
 import { useStore } from '../store';
 
@@ -44,6 +44,7 @@ export function TodayPage({ date, setDate }: { date: string; setDate: (d: string
   const habits = useHabits();
   const logs = useLogSet();
   const steady = useActiveProjects().filter((p) => p.kind === 'steady');
+  const areaList = useAreas();
   const sessions = useSessions();
   const now = useNow();
   const tracked = useTrackedByTask();
@@ -96,6 +97,8 @@ export function TodayPage({ date, setDate }: { date: string; setDate: (d: string
   const actual = sumSessions(sessions, from, to, now).total;
   const ws = weekStart(date);
   const week = sumSessions(sessions, fromKey(ws).getTime(), fromKey(addDays(ws, 7)).getTime(), now);
+  // 주간 목표가 걸린 범주 (예: 운동 주 4h)
+  const areaTargets = areaList.filter((a) => targetFor(a, ws) > 0);
 
   return (
     <div className="space-y-4">
@@ -149,10 +152,13 @@ export function TodayPage({ date, setDate }: { date: string; setDate: (d: string
               )}
             </ul>
 
-            {steady.length > 0 && (
+            {steady.length + areaTargets.length > 0 && (
               <>
                 <SectionTitle n={3} title="꾸준히 · 이번 주 목표" />
                 <ul>
+                  {areaTargets.map((a) => (
+                    <AreaTargetRow key={a.id} area={a} today={today} weekMinutes={week.byArea[a.id] ?? 0} />
+                  ))}
                   {steady.map((p) => (
                     <SteadyRow key={p.id} project={p} today={today} weekMinutes={week.byProject[p.id] ?? 0} />
                   ))}
