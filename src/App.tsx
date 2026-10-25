@@ -3,6 +3,7 @@ import { CalendarCheck2, CalendarRange, FolderKanban, Settings as SettingsIcon, 
 import { BucketList } from './components/BucketList';
 import { SyncBadge } from './components/SyncBadge';
 import { TimerBar } from './components/TimerBar';
+import { TimerFixDialog, useAwayCheck } from './components/TimerFixDialog';
 import { cn } from './components/ui';
 import { todayKey } from './lib/date';
 import { ProjectsPage } from './pages/Projects';
@@ -47,6 +48,7 @@ export default function App() {
   const [date, setDate] = useState(todayKey);
   const [bucketOpen, setBucketOpen] = useState(false);
   const closeBucket = useCallback(() => setBucketOpen(false), []);
+  useAwayCheck(); // 자리 비운 사이 켜져 있던 타이머 확인
 
   if (!hydrated) return <div className="grid h-dvh place-items-center text-sm text-zinc-400">불러오는 중…</div>;
 
@@ -97,6 +99,7 @@ export default function App() {
       </main>
 
       <TimerBar />
+      <TimerFixDialog />
       {bucketOpen && <BucketList onClose={closeBucket} />}
 
       <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-zinc-200/70 bg-white/90 pb-[env(safe-area-inset-bottom)] backdrop-blur-md md:hidden dark:border-zinc-800 dark:bg-zinc-950/90">

@@ -77,29 +77,58 @@ export function DayLog({ date, tasks, habits }: { date: string; tasks: Task[]; h
   );
 }
 
+/** 이보다 긴 기록은 "끄는 걸 깜빡했나?"로 보고 주황색으로 알린다 */
+const LONG_MS = 3 * 3_600_000;
+const pad2 = (n: number) => String(n).padStart(2, '0');
+const toLocalInput = (iso: string) => {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+};
+
 function SessionRow({ s, date, name, color, now }: { s: Session; date: string; name: string; color: string; now: number }) {
   const [edit, setEdit] = useState(false);
   const dur = (s.end ? Date.parse(s.end) : now) - Date.parse(s.start);
+  const long = dur >= LONG_MS;
   const t = (iso: string) => hhmm(new Date(iso));
+  // 자정을 넘긴 기록은 날짜까지 고칠 수 있게 (시각만 고치면 엉뚱한 날로 바뀔 수 있어서)
+  const crossDay = !!s.end && new Date(s.start).toDateString() !== new Date(s.end).toDateString();
+  const fullEdit = crossDay || long;
+  const setAt = (field: 'start' | 'end', v: string) => {
+    if (!v) return;
+    const iso = fullEdit ? new Date(v).toISOString() : atTime(date, v);
+    const other = field === 'start' ? s.end : s.start;
+    // 시작이 끝보다 늦어지지 않게
+    if (other && (field === 'start' ? Date.parse(iso) >= Date.parse(other) : Date.parse(iso) <= Date.parse(other))) return;
+    updateSession(s.id, { [field]: iso });
+  };
+  const input = (field: 'start' | 'end', iso: string) =>
+    fullEdit ? (
+      <input type="datetime-local" value={toLocalInput(iso)} onChange={(e) => setAt(field, e.target.value)} className={cn(fieldCls, 'h-7 px-1.5 text-xs')} aria-label={field === 'start' ? '시작' : '끝'} />
+    ) : (
+      <input type="time" value={t(iso)} onChange={(e) => setAt(field, e.target.value)} className={cn(fieldCls, 'h-7 px-1.5 text-xs')} aria-label={field === 'start' ? '시작' : '끝'} />
+    );
   return (
     <li>
-      <button onClick={() => setEdit(!edit)} className="flex w-full items-center gap-2.5 rounded-lg px-1.5 py-1.5 text-left text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
+      <button
+        onClick={() => setEdit(!edit)}
+        className={cn(
+          'flex w-full items-center gap-2.5 rounded-lg px-1.5 py-1.5 text-left text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800/50',
+          long && s.end && 'bg-amber-50 dark:bg-amber-500/10',
+        )}
+      >
         <span className="h-4 w-1 shrink-0 rounded-full" style={{ background: color }} />
         <span className="w-[86px] shrink-0 text-xs text-zinc-500 tabular-nums">
           {t(s.start)}–{s.end ? t(s.end) : '지금'}
         </span>
         <span className="min-w-0 flex-1 truncate">{name}</span>
-        <span className="shrink-0 text-xs font-semibold tabular-nums">{fmtDur(dur / 60_000)}</span>
+        <span className={cn('shrink-0 text-xs font-semibold tabular-nums', long && 'text-amber-600')}>{fmtDur(dur / 60_000)}</span>
       </button>
+      {long && s.end && !edit && <p className="mb-1 ml-4 text-[11px] text-amber-600">3시간이 넘어요. 끄는 걸 깜빡했다면 눌러서 끝난 시각을 고치세요.</p>}
       {edit && (
         <div className="mb-2 ml-3 flex flex-wrap items-center gap-2 rounded-lg bg-zinc-50 p-2 text-xs dark:bg-zinc-800/50">
-          <input type="time" value={t(s.start)} onChange={(e) => e.target.value && updateSession(s.id, { start: atTime(date, e.target.value) })} className={cn(fieldCls, 'h-7 px-1.5 text-xs')} aria-label="시작" />
+          {input('start', s.start)}
           –
-          {s.end ? (
-            <input type="time" value={t(s.end)} onChange={(e) => e.target.value && updateSession(s.id, { end: atTime(date, e.target.value) })} className={cn(fieldCls, 'h-7 px-1.5 text-xs')} aria-label="끝" />
-          ) : (
-            <span className="text-zinc-400">진행 중</span>
-          )}
+          {s.end ? input('end', s.end) : <span className="text-zinc-400">진행 중</span>}
           <button onClick={() => deleteSession(s.id)} className="ml-auto flex items-center gap-1 rounded px-1.5 py-1 text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-500/10">
             <Trash2 className="size-3.5" /> 삭제
           </button>

@@ -82,8 +82,20 @@ async function push(userId: string) {
   });
 }
 
-async function pull() {
-  for (const t of TABLES) {
+/**
+ * 타이머를 끝내기 직전에 서버의 타이머 기록을 먼저 받아온다.
+ * 다른 기기에서 이미 끈 타이머를 이 기기가 "아직 켜져 있다"고 보고 지금 시각으로 덮어쓰지 않게.
+ * 오프라인이거나 로그인 전이면 그냥 넘어간다. 최대 timeoutMs만 기다린다.
+ */
+export async function refreshSessions(timeoutMs = 1500) {
+  if (!supabase || !navigator.onLine || !useStore.getState().hydrated) return;
+  const { data } = await supabase.auth.getSession();
+  if (!data.session) return;
+  await Promise.race([pull(['sessions']).catch(() => {}), new Promise((r) => setTimeout(r, timeoutMs))]);
+}
+
+async function pull(tables: TableName[] = TABLES) {
+  for (const t of tables) {
     let cursor = useStore.getState().cursors[t];
     for (;;) {
       let q = supabase!.from(t).select('*').order('synced_at', { ascending: true }).limit(PAGE);
@@ -132,7 +144,9 @@ export function initSync() {
     }
   });
   document.addEventListener('visibilitychange', () => {
+    // 다시 보면 받아오고, 다른 앱으로 넘어가거나 닫을 때는 남은 변경을 바로 올린다
     if (document.visibilityState === 'visible') scheduleSync(0);
+    else void syncNow();
   });
   window.addEventListener('online', () => scheduleSync(0));
   setInterval(() => {

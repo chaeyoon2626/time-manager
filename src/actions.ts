@@ -5,6 +5,8 @@ import { parseTask } from './lib/parse';
 import type { Area, BucketItem, BucketKind, Habit, Milestone, PlanSlot, Project, ProjectKind, Review, ReviewLevel, Session, Subarea, Target, Task } from './lib/types';
 import { TABLES } from './lib/types';
 import { patchRow, putRows, routineTaskId, userDailyArea, useStore, type Settings } from './store';
+import { refreshSessions, scheduleSync } from './sync';
+import { openTimerPrompt } from './timerPrompt';
 
 const data = () => useStore.getState().data;
 
@@ -324,15 +326,38 @@ export const runningSession = (): Session | undefined =>
 
 export type TimerTarget = { task_id?: string; project_id?: string; area_id?: string; habit_id?: string; title: string };
 
-/** 1분도 안 된 기록은 실수로 누른 것으로 보고 지운다 */
-const endRun = (run: Session, now: string): Omit<Session, 'updated_at'> => ({
-  ...run,
-  end: now,
-  deleted: Date.parse(now) - Date.parse(run.start) < 60_000,
-});
+/** 이 시간보다 오래 켜진 타이머는 "끄는 걸 깜빡했나?"로 보고, 끝낼 때 시각을 물어본다 */
+export const LONG_RUN_MS = 3 * 3_600_000;
+export const isLongRun = (s: Session, now = Date.now()) => !s.end && now - Date.parse(s.start) >= LONG_RUN_MS;
 
-/** 시작하면 돌던 타이머는 지금 시각으로 끝낸다 (하나만 돈다) */
-export function startTimer(t: TimerTarget) {
+/** 1분도 안 된 기록은 실수로 누른 것으로 보고 지운다. 끝 시각은 시작 이후 · 지금 이전으로 맞춘다 */
+const endRun = (run: Session, at: string): Omit<Session, 'updated_at'> => {
+  const ms = Math.min(Math.max(Date.parse(at), Date.parse(run.start)), Date.now());
+  return { ...run, end: new Date(ms).toISOString(), deleted: ms - Date.parse(run.start) < 60_000 };
+};
+
+/** 켜져 있던 타이머를 정한 시각으로 끝낸다 (확인창에서 고른 시각) */
+export function endTimerAt(sessionId: string, at: string) {
+  const run = data().sessions[sessionId];
+  if (!run || run.deleted || run.end) return;
+  putRows('sessions', [endRun(run, at)]);
+  scheduleSync(0);
+}
+
+/**
+ * 타이머 시작. 돌던 타이머는 지금 시각으로 끝낸다 (하나만 돈다).
+ * 단, 돌던 타이머가 3시간 넘게 켜져 있었으면 끝난 시각부터 물어본다.
+ * 시작 전에 서버의 타이머 기록을 먼저 받아와서, 다른 기기에서 이미 끈 걸 덮어쓰지 않는다.
+ */
+export async function startTimer(t: TimerTarget) {
+  await refreshSessions();
+  const run = runningSession();
+  if (run && isLongRun(run)) return openTimerPrompt({ reason: 'start', sessionId: run.id, next: t });
+  startTimerNow(t);
+}
+
+/** 확인 없이 바로 시작 (돌던 건 지금 끝냄) */
+export function startTimerNow(t: TimerTarget) {
   const now = new Date().toISOString();
   const rows: Omit<Session, 'updated_at'>[] = [];
   const run = runningSession();
@@ -349,11 +374,16 @@ export function startTimer(t: TimerTarget) {
     deleted: false,
   });
   putRows('sessions', rows);
+  scheduleSync(0); // 다른 기기가 바로 알 수 있게 1초 기다리지 않고 올린다
 }
 
-export function stopTimer() {
+/** 타이머 끄기. 3시간 넘게 켜져 있었으면 끝난 시각을 물어본다 */
+export async function stopTimer() {
+  await refreshSessions();
   const run = runningSession();
-  if (run) putRows('sessions', [endRun(run, new Date().toISOString())]);
+  if (!run) return;
+  if (isLongRun(run)) return openTimerPrompt({ reason: 'stop', sessionId: run.id });
+  endTimerAt(run.id, new Date().toISOString());
 }
 
 export function addSession(s: Omit<Session, 'id' | 'updated_at' | 'deleted'>) {
